@@ -31,7 +31,7 @@ const ClusterFinalizer = "cluster.cluster.k8s.io"
 /// [Cluster]
 // Cluster is the Schema for the clusters API
 // +k8s:openapi-gen=true
-// +kubebuilder:resource:shortName=cl
+// +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -152,6 +152,7 @@ func (o *Cluster) Validate() field.ErrorList {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 
 // ClusterList contains a list of Cluster
 type ClusterList struct {

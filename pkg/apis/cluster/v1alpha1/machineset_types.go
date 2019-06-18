@@ -32,7 +32,7 @@ import (
 /// [MachineSet]
 // MachineSet ensures that a specified number of machines replicas are running at any given time.
 // +k8s:openapi-gen=true
-// +kubebuilder:resource:shortName=ms
+// +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas,selectorpath=.status.labelSelector
 type MachineSet struct {
@@ -61,7 +61,7 @@ type MachineSetSpec struct {
 
 	// DeletePolicy defines the policy used to identify nodes to delete when downscaling.
 	// Defaults to "Random".  Valid values are "Random, "Newest", "Oldest"
-	// +kubebuilder:validation:Enum=Random,Newest,Oldest
+	// +kubebuilder:validation:[Enum=Random,Newest,Oldest]
 	DeletePolicy string `json:"deletePolicy,omitempty"`
 
 	// Selector is a label query over machines that should match the replica count.
@@ -209,6 +209,7 @@ func (m *MachineSet) Default() {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 
 // MachineSetList contains a list of MachineSet
 type MachineSetList struct {

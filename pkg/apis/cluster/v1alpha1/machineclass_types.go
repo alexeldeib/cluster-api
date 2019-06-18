@@ -30,7 +30,7 @@ import (
 // across multiple Machines / MachineSets / MachineDeployments.
 // +k8s:openapi-gen=true
 // +resource:path=machineclasses
-// +kubebuilder:resource:shortName=mc
+// +kubebuilder:object:root=true
 type MachineClass struct {
 	metav1.TypeMeta `json:",inline"`
 	// +optional
@@ -66,6 +66,7 @@ type MachineClass struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 
 // MachineClassList contains a list of MachineClasses
 type MachineClassList struct {

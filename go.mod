@@ -17,10 +17,12 @@ require (
 	k8s.io/apimachinery v0.0.0-20190612125636-6a5db36e93ad
 	k8s.io/apiserver v0.0.0-20190615170205-3722cb685593
 	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
+	k8s.io/code-generator v0.0.0-20190612125529-c522cb6c26aa // indirect
 	k8s.io/component-base v0.0.0-20190617074208-2b0aae80ca81
 	k8s.io/klog v0.3.1
 	k8s.io/utils v0.0.0-20190506122338-8fab8cb257d5
 	sigs.k8s.io/controller-runtime v0.2.0-beta.2
+	sigs.k8s.io/controller-tools v0.1.10 // indirect
 )
 
 replace (

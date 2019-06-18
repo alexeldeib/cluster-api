@@ -17,6 +17,7 @@ limitations under the License.
 package clusterclient
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -30,10 +31,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	_ "k8s.io/client-go/plugin/pkg/client/auth" // nolint
 	tcmd "k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
@@ -41,6 +43,8 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	"sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset"
 	"sigs.k8s.io/cluster-api/pkg/util"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -129,17 +133,18 @@ func (c *client) removeKubeconfigFile() error {
 }
 
 func (c *client) EnsureNamespace(namespaceName string) error {
-	clientset, err := clientcmd.NewCoreClientSetForDefaultSearchPath(c.kubeconfigFile, clientcmd.NewConfigOverrides())
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrap(err, "error creating core clientset")
+		return errors.Wrap(err, "error creating config for core clientset")
 	}
 
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
 	namespace := apiv1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: namespaceName,
 		},
 	}
-	_, err = clientset.CoreV1().Namespaces().Create(&namespace)
+	err = clientset.Create(context.Background(), &namespace)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
@@ -147,21 +152,22 @@ func (c *client) EnsureNamespace(namespaceName string) error {
 }
 
 func (c *client) ScaleStatefulSet(ns string, name string, scale int32) error {
-	clientset, err := clientcmd.NewCoreClientSetForDefaultSearchPath(c.kubeconfigFile, clientcmd.NewConfigOverrides())
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrap(err, "error creating core clientset")
+		return errors.Wrap(err, "error creating config for core clientset")
 	}
 
-	_, err = clientset.AppsV1().StatefulSets(ns).UpdateScale(name, &autoscalingv1.Scale{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: ns,
-			Name:      name,
-		},
-		Spec: autoscalingv1.ScaleSpec{
-			Replicas: scale,
-		},
-	})
-	if err != nil && !apierrors.IsNotFound(err) {
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+	var ss appsv1.StatefulSet
+	err = clientset.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &ss)
+	if err != nil {
+		// IsNotFound would be a real error here, since we are only trying to scale.
+		return err
+	}
+	ss.Spec.Replicas = &scale
+	err = clientset.Update(context.Background(), &ss)
+	if err != nil {
 		return err
 	}
 	return nil
@@ -171,12 +177,20 @@ func (c *client) DeleteNamespace(namespaceName string) error {
 	if namespaceName == apiv1.NamespaceDefault {
 		return nil
 	}
-	clientset, err := clientcmd.NewCoreClientSetForDefaultSearchPath(c.kubeconfigFile, clientcmd.NewConfigOverrides())
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrap(err, "error creating core clientset")
+		return errors.Wrap(err, "error creating config for core clientset")
 	}
 
-	err = clientset.CoreV1().Namespaces().Delete(namespaceName, &metav1.DeleteOptions{})
+	ns := apiv1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespaceName,
+		},
+	}
+
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.Delete(context.Background(), &ns)
+
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -257,101 +271,170 @@ func (c *client) ForceDeleteCluster(namespace, name string) error {
 }
 
 func (c *client) GetClusters(namespace string) ([]*clusterv1.Cluster, error) {
-	clusters := []*clusterv1.Cluster{}
-	clusterlist, err := c.clientSet.ClusterV1alpha1().Clusters(namespace).List(metav1.ListOptions{})
+	clusters := &clusterv1.ClusterList{}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return []*clusterv1.Cluster{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	opts := &ctrlclient.ListOptions{
+		Namespace: namespace,
+	}
+	err = clientset.List(context.Background(), clusters, ctrlclient.UseListOptions(opts))
 	if err != nil {
 		return nil, errors.Wrapf(err, "error listing cluster objects in namespace %q", namespace)
 	}
-
-	for i := 0; i < len(clusterlist.Items); i++ {
-		clusters = append(clusters, &clusterlist.Items[i])
+	var clusterList []*clusterv1.Cluster
+	for i := 0; i < len(clusters.Items); i++ {
+		clusterList = append(clusterList, &clusters.Items[i])
 	}
-	return clusters, nil
+
+	return clusterList, nil
 }
 
 func (c *client) GetMachineClasses(namespace string) ([]*clusterv1.MachineClass, error) {
-	machineClassesList, err := c.clientSet.ClusterV1alpha1().MachineClasses(namespace).List(metav1.ListOptions{})
+	machineClasses := &clusterv1.MachineClassList{}
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return nil, errors.Wrapf(err, "error listing MachineClasses in namespace %q", namespace)
+		return []*clusterv1.MachineClass{}, errors.Wrap(err, "error creating config for core clientset")
 	}
-	var machineClasses []*clusterv1.MachineClass
-	for i := 0; i < len(machineClassesList.Items); i++ {
-		machineClasses = append(machineClasses, &machineClassesList.Items[i])
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.List(context.Background(), machineClasses)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error listing machine class objects in namespace %q", namespace)
 	}
-	return machineClasses, nil
+
+	var machineClassesList []*clusterv1.MachineClass
+	for i := 0; i < len(machineClasses.Items); i++ {
+		machineClassesList = append(machineClassesList, &(machineClasses.Items[i]))
+	}
+
+	return machineClassesList, nil
 }
 
 func (c *client) GetMachineDeployment(namespace, name string) (*clusterv1.MachineDeployment, error) {
-	machineDeployment, err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).Get(name, metav1.GetOptions{})
+	machineDeployment := &clusterv1.MachineDeployment{}
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting MachineDeployment: %s/%s", namespace, name)
+		return &clusterv1.MachineDeployment{}, errors.Wrap(err, "error creating config for core clientset")
 	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: name}, machineDeployment)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error listing machine deployment objects in namespace %q", namespace)
+	}
+
 	return machineDeployment, nil
 }
 
 func (c *client) GetMachineDeploymentsForCluster(cluster *clusterv1.Cluster) ([]*clusterv1.MachineDeployment, error) {
-	machineDeploymentList, err := c.clientSet.ClusterV1alpha1().MachineDeployments(cluster.Namespace).List(metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", machineClusterLabelName, cluster.Name),
-	})
+	machineDeploymentList := &clusterv1.MachineDeploymentList{}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return []*clusterv1.MachineDeployment{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+	listOpts := &ctrlclient.ListOptions{}
+	err = listOpts.SetLabelSelector(fmt.Sprintf("%s=%s", machineClusterLabelName, cluster.Name))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error settings label selector '%s=%s' for Cluster %s/%s", machineClusterLabelName, cluster.Name, cluster.Namespace, cluster.Name)
+	}
+
+	err = clientset.List(context.Background(), machineDeploymentList, ctrlclient.UseListOptions(listOpts))
 	if err != nil {
 		return nil, errors.Wrapf(err, "error listing MachineDeployments for Cluster %s/%s", cluster.Namespace, cluster.Name)
 	}
+
 	var machineDeployments []*clusterv1.MachineDeployment
-	for _, md := range machineDeploymentList.Items {
+	for idx, md := range machineDeploymentList.Items {
 		for _, or := range md.GetOwnerReferences() {
 			if or.Kind == cluster.Kind && or.Name == cluster.Name {
-				machineDeployments = append(machineDeployments, &md)
+				machineDeployments = append(machineDeployments, machineDeployments[idx])
 				continue
 			}
 		}
 	}
+
 	return machineDeployments, nil
 }
 
 func (c *client) GetMachineDeployments(namespace string) ([]*clusterv1.MachineDeployment, error) {
-	machineDeploymentList, err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).List(metav1.ListOptions{})
+	machineDeployments := clusterv1.MachineDeploymentList{}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return []*clusterv1.MachineDeployment{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.List(context.Background(), &machineDeployments)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error listing machine deployment objects in namespace %q", namespace)
 	}
-	var machineDeployments []*clusterv1.MachineDeployment
-	for i := 0; i < len(machineDeploymentList.Items); i++ {
-		machineDeployments = append(machineDeployments, &machineDeploymentList.Items[i])
+
+	var machineDeploymentsList []*clusterv1.MachineDeployment
+	for i := 0; i < len(machineDeployments.Items); i++ {
+		machineDeploymentsList = append(machineDeploymentsList, &machineDeployments.Items[i])
 	}
-	return machineDeployments, nil
+
+	return machineDeploymentsList, nil
 }
 
 func (c *client) GetMachineSet(namespace, name string) (*clusterv1.MachineSet, error) {
-	machineSet, err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).Get(name, metav1.GetOptions{})
+	machineSet := &clusterv1.MachineSet{}
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting MachineSet: %s/%s", namespace, name)
+		return &clusterv1.MachineSet{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: name}, machineSet)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error listing machine deployment objects in namespace %q", namespace)
 	}
 	return machineSet, nil
 }
 
 func (c *client) GetMachineSets(namespace string) ([]*clusterv1.MachineSet, error) {
-	machineSetList, err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).List(metav1.ListOptions{})
+	machineSets := clusterv1.MachineSetList{}
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return nil, errors.Wrapf(err, "error listing MachineSets in namespace %q", namespace)
+		return []*clusterv1.MachineSet{}, errors.Wrap(err, "error creating config for core clientset")
 	}
-	var machineSets []*clusterv1.MachineSet
-	for i := 0; i < len(machineSetList.Items); i++ {
-		machineSets = append(machineSets, &machineSetList.Items[i])
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.List(context.Background(), &machineSets)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error listing machine deployment objects in namespace %q", namespace)
 	}
-	return machineSets, nil
+
+	var machineSetsList []*clusterv1.MachineSet
+	for i := 0; i < len(machineSets.Items); i++ {
+		machineSetsList = append(machineSetsList, &machineSets.Items[i])
+	}
+
+	return machineSetsList, nil
 }
 
 func (c *client) GetMachineSetsForCluster(cluster *clusterv1.Cluster) ([]*clusterv1.MachineSet, error) {
-	machineSetList, err := c.clientSet.ClusterV1alpha1().MachineSets(cluster.Namespace).List(metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", machineClusterLabelName, cluster.Name),
-	})
+	machineSetList := clusterv1.MachineSetList{}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return []*clusterv1.MachineSet{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	listOpts := &ctrlclient.ListOptions{}
+	err = listOpts.SetLabelSelector(fmt.Sprintf("%s=%s", machineClusterLabelName, cluster.Name))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error settings label selector '%s=%s' for Cluster %s/%s", machineClusterLabelName, cluster.Name, cluster.Namespace, cluster.Name)
+	}
+	err = clientset.List(context.Background(), &machineSetList, ctrlclient.UseListOptions(listOpts))
 	if err != nil {
 		return nil, errors.Wrapf(err, "error listing MachineSets for Cluster %s/%s", cluster.Namespace, cluster.Name)
 	}
 	var machineSets []*clusterv1.MachineSet
-	for _, ms := range machineSetList.Items {
-		for _, or := range ms.GetOwnerReferences() {
+	for idx, md := range machineSetList.Items {
+		for _, or := range md.GetOwnerReferences() {
 			if or.Kind == cluster.Kind && or.Name == cluster.Name {
-				machineSets = append(machineSets, &ms)
+				machineSets = append(machineSets, &machineSetList.Items[idx])
 				continue
 			}
 		}
@@ -374,38 +457,49 @@ func (c *client) GetMachineSetsForMachineDeployment(md *clusterv1.MachineDeploym
 }
 
 func (c *client) GetMachines(namespace string) ([]*clusterv1.Machine, error) {
-	machines := []*clusterv1.Machine{}
-	machineslist, err := c.clientSet.ClusterV1alpha1().Machines(namespace).List(metav1.ListOptions{})
+	machines := clusterv1.MachineList{}
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return nil, errors.Wrapf(err, "error listing Machines in namespace %q", namespace)
+		return []*clusterv1.Machine{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	err = clientset.List(context.Background(), &machines)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error listing machine objects in namespace %q", namespace)
+	}
+	var machinesList []*clusterv1.Machine
+	for i := 0; i < len(machines.Items); i++ {
+		machinesList = append(machinesList, &machines.Items[i])
 	}
 
-	for i := 0; i < len(machineslist.Items); i++ {
-		machines = append(machines, &machineslist.Items[i])
-	}
-	return machines, nil
+	return machinesList, nil
 }
 
 func (c *client) GetMachinesForCluster(cluster *clusterv1.Cluster) ([]*clusterv1.Machine, error) {
-	machineslist, err := c.clientSet.ClusterV1alpha1().Machines(cluster.Namespace).List(metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", machineClusterLabelName, cluster.Name),
-	})
+	machineslist := clusterv1.MachineList{}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return []*clusterv1.Machine{}, errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	listOpts := &ctrlclient.ListOptions{}
+	err = listOpts.SetLabelSelector(fmt.Sprintf("%s=%s", machineClusterLabelName, cluster.Name))
+	if err != nil {
+		return nil, errors.Wrapf(err, "error settings label selector '%s=%s' for Cluster %s/%s", machineClusterLabelName, cluster.Name, cluster.Namespace, cluster.Name)
+	}
+	err = clientset.List(context.Background(), &machineslist, ctrlclient.UseListOptions(listOpts))
 	if err != nil {
 		return nil, errors.Wrapf(err, "error listing Machines for Cluster %s/%s", cluster.Namespace, cluster.Name)
 	}
 	var machines []*clusterv1.Machine
-
-	for i := 0; i < len(machineslist.Items); i++ {
-		m := &machineslist.Items[i]
-
-		for _, or := range m.GetOwnerReferences() {
+	for idx, md := range machineslist.Items {
+		for _, or := range md.GetOwnerReferences() {
 			if or.Kind == cluster.Kind && or.Name == cluster.Name {
-				machines = append(machines, m)
-				break
+				machines = append(machines, &machineslist.Items[idx])
+				continue
 			}
 		}
 	}
-
 	return machines, nil
 }
 
@@ -424,15 +518,30 @@ func (c *client) GetMachinesForMachineSet(ms *clusterv1.MachineSet) ([]*clusterv
 }
 
 func (c *client) CreateMachineClass(machineClass *clusterv1.MachineClass) error {
-	_, err := c.clientSet.ClusterV1alpha1().MachineClasses(machineClass.Namespace).Create(machineClass)
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrapf(err, "error creating MachineClass %s/%s", machineClass.Namespace, machineClass.Name)
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	if err = clientset.Create(context.Background(), machineClass); err != nil {
+		return errors.Wrapf(err, "error listing machine set object %s in namespace %q", machineClass.Namespace, machineClass.Name)
 	}
 	return nil
 }
 
 func (c *client) DeleteMachineClass(namespace, name string) error {
-	if err := c.clientSet.ClusterV1alpha1().MachineClasses(namespace).Delete(name, newDeleteOptions()); err != nil {
+	machineClass := &clusterv1.MachineClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
+	}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	if err = clientset.Delete(context.Background(), machineClass); err != nil {
 		return errors.Wrapf(err, "error deleting MachineClass %s/%s", namespace, name)
 	}
 	return nil
@@ -440,35 +549,53 @@ func (c *client) DeleteMachineClass(namespace, name string) error {
 
 func (c *client) CreateClusterObject(cluster *clusterv1.Cluster) error {
 	namespace := c.GetContextNamespace()
-	if cluster.Namespace != "" {
-		namespace = cluster.Namespace
+	if cluster.Namespace == "" {
+		cluster.Namespace = namespace
 	}
 
-	_, err := c.clientSet.ClusterV1alpha1().Clusters(namespace).Create(cluster)
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrapf(err, "error creating cluster in namespace %v", namespace)
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+	if err = clientset.Create(context.Background(), cluster); err != nil {
+		return errors.Wrapf(err, "error listing machine set object %s in namespace %q", cluster.Namespace, cluster.Name)
 	}
 	return nil
 }
 
 func (c *client) CreateMachineDeployments(deployments []*clusterv1.MachineDeployment, namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	for _, deploy := range deployments {
+		deploy.Namespace = namespace
 		// TODO: Run in parallel https://github.com/kubernetes-sigs/cluster-api/issues/258
-		_, err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).Create(deploy)
-		if err != nil {
+		if err = clientset.Create(context.Background(), deploy); err != nil {
 			return errors.Wrapf(err, "error creating a machine deployment object in namespace %q", namespace)
 		}
+		return nil
 	}
 	return nil
 }
 
 func (c *client) CreateMachineSets(machineSets []*clusterv1.MachineSet, namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	for _, ms := range machineSets {
+		ms.Namespace = namespace
 		// TODO: Run in parallel https://github.com/kubernetes-sigs/cluster-api/issues/258
-		_, err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).Create(ms)
-		if err != nil {
+		if err = clientset.Create(context.Background(), ms); err != nil {
 			return errors.Wrapf(err, "error creating a machine set object in namespace %q", namespace)
 		}
+		return nil
 	}
 	return nil
 }
@@ -479,14 +606,21 @@ func (c *client) CreateMachines(machines []*clusterv1.Machine, namespace string)
 		errOnce sync.Once
 		gerr    error
 	)
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	// The approach to concurrency here comes from golang.org/x/sync/errgroup.
 	for _, machine := range machines {
 		wg.Add(1)
 
 		go func(machine *clusterv1.Machine) {
 			defer wg.Done()
-
-			createdMachine, err := c.clientSet.ClusterV1alpha1().Machines(namespace).Create(machine)
+			var createdMachine *clusterv1.Machine
+			machine.Namespace = namespace
+			err = clientset.Create(context.Background(), machine)
 			if err != nil {
 				errOnce.Do(func() {
 					gerr = errors.Wrapf(err, "error creating a machine object in namespace %v", namespace)
@@ -505,23 +639,32 @@ func (c *client) CreateMachines(machines []*clusterv1.Machine, namespace string)
 
 // DeleteClusters deletes all Clusters in a namespace. If the namespace is empty then all Clusters in all namespaces are deleted.
 func (c *client) DeleteClusters(namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	seen := make(map[string]bool)
+	clustersToDelete := make(map[string]*clusterv1.ClusterList)
 
 	if namespace != "" {
 		seen[namespace] = true
 	} else {
-		clusters, err := c.clientSet.ClusterV1alpha1().Clusters("").List(metav1.ListOptions{})
+		clusters := &clusterv1.ClusterList{}
+		err = clientset.List(context.Background(), clusters)
 		if err != nil {
 			return errors.Wrap(err, "error listing Clusters in all namespaces")
 		}
 		for _, cluster := range clusters.Items {
 			if _, ok := seen[cluster.Namespace]; !ok {
 				seen[cluster.Namespace] = true
+				clustersToDelete[cluster.Namespace].Items = append(clustersToDelete[cluster.Namespace].Items, cluster)
 			}
 		}
 	}
 	for ns := range seen {
-		err := c.clientSet.ClusterV1alpha1().Clusters(ns).DeleteCollection(newDeleteOptions(), metav1.ListOptions{})
+		err = clientset.Delete(context.Background(), clustersToDelete[ns])
 		if err != nil {
 			return errors.Wrapf(err, "error deleting Clusters in namespace %q", ns)
 		}
@@ -536,31 +679,38 @@ func (c *client) DeleteClusters(namespace string) error {
 
 // DeleteMachineClasses deletes all MachineClasses in a namespace. If the namespace is empty then all MachineClasses in all namespaces are deleted.
 func (c *client) DeleteMachineClasses(namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	seen := make(map[string]bool)
+	machineClassesToDelete := make(map[string]*clusterv1.MachineClassList)
 
 	if namespace != "" {
 		seen[namespace] = true
 	} else {
-		machineClasses, err := c.clientSet.ClusterV1alpha1().MachineClasses("").List(metav1.ListOptions{})
+		machineClasses := &clusterv1.MachineClassList{}
+		err := clientset.List(context.Background(), machineClasses)
 		if err != nil {
-			return errors.Wrap(err, "error listing MachineClasses in all namespaces")
+			return errors.Wrap(err, "error listing MachineClasss in all namespaces")
 		}
-		for _, mc := range machineClasses.Items {
-			if _, ok := seen[mc.Namespace]; !ok {
-				seen[mc.Namespace] = true
+		for _, cluster := range machineClasses.Items {
+			if _, ok := seen[cluster.Namespace]; !ok {
+				seen[cluster.Namespace] = true
+				machineClassesToDelete[cluster.Namespace].Items = append(machineClassesToDelete[cluster.Namespace].Items, cluster)
 			}
 		}
 	}
-
 	for ns := range seen {
 		if err := c.DeleteMachineClasses(ns); err != nil {
 			return err
 		}
-		err := c.clientSet.ClusterV1alpha1().MachineClasses(ns).DeleteCollection(newDeleteOptions(), metav1.ListOptions{})
-		if err != nil {
+		if err := clientset.Delete(context.Background(), machineClassesToDelete[ns]); err != nil {
 			return errors.Wrapf(err, "error deleting MachineClasses in namespace %q", ns)
 		}
-		err = c.waitForMachineClassesDelete(ns)
+		err := c.waitForMachineClassesDelete(ns)
 		if err != nil {
 			return errors.Wrapf(err, "error waiting for MachineClass(es) deletion to complete in ns %q", ns)
 		}
@@ -571,23 +721,32 @@ func (c *client) DeleteMachineClasses(namespace string) error {
 
 // DeleteMachineDeployments deletes all MachineDeployments in a namespace. If the namespace is empty then all MachineDeployments in all namespaces are deleted.
 func (c *client) DeleteMachineDeployments(namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	seen := make(map[string]bool)
+	machineDeploymentsToDelete := make(map[string]*clusterv1.MachineDeploymentList)
 
 	if namespace != "" {
 		seen[namespace] = true
 	} else {
-		machineDeployments, err := c.clientSet.ClusterV1alpha1().MachineDeployments("").List(metav1.ListOptions{})
+		machineDeployments := &clusterv1.MachineDeploymentList{}
+		err := clientset.List(context.Background(), machineDeployments)
 		if err != nil {
 			return errors.Wrap(err, "error listing MachineDeployments in all namespaces")
 		}
-		for _, md := range machineDeployments.Items {
-			if _, ok := seen[md.Namespace]; !ok {
-				seen[md.Namespace] = true
+		for _, cluster := range machineDeployments.Items {
+			if _, ok := seen[cluster.Namespace]; !ok {
+				seen[cluster.Namespace] = true
+				machineDeploymentsToDelete[cluster.Namespace].Items = append(machineDeploymentsToDelete[cluster.Namespace].Items, cluster)
 			}
 		}
 	}
 	for ns := range seen {
-		err := c.clientSet.ClusterV1alpha1().MachineDeployments(ns).DeleteCollection(newDeleteOptions(), metav1.ListOptions{})
+		err = clientset.Delete(context.Background(), machineDeploymentsToDelete[ns])
 		if err != nil {
 			return errors.Wrapf(err, "error deleting MachineDeployments in namespace %q", ns)
 		}
@@ -596,29 +755,37 @@ func (c *client) DeleteMachineDeployments(namespace string) error {
 			return errors.Wrapf(err, "error waiting for MachineDeployment(s) deletion to complete in namespace %q", ns)
 		}
 	}
-
 	return nil
 }
 
 // DeleteMachineSets deletes all MachineSets in a namespace. If the namespace is empty then all MachineSets in all namespaces are deleted.
 func (c *client) DeleteMachineSets(namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	seen := make(map[string]bool)
+	machineSetsToDelete := make(map[string]*clusterv1.MachineSetList)
 
 	if namespace != "" {
 		seen[namespace] = true
 	} else {
-		machineSets, err := c.clientSet.ClusterV1alpha1().MachineSets("").List(metav1.ListOptions{})
+		machineSets := &clusterv1.MachineSetList{}
+		err := clientset.List(context.Background(), machineSets)
 		if err != nil {
 			return errors.Wrap(err, "error listing MachineSets in all namespaces")
 		}
 		for _, ms := range machineSets.Items {
 			if _, ok := seen[ms.Namespace]; !ok {
 				seen[ms.Namespace] = true
+				machineSetsToDelete[ms.Namespace].Items = append(machineSetsToDelete[ms.Namespace].Items, ms)
 			}
 		}
 	}
 	for ns := range seen {
-		err := c.clientSet.ClusterV1alpha1().MachineSets(ns).DeleteCollection(newDeleteOptions(), metav1.ListOptions{})
+		err = clientset.Delete(context.Background(), machineSetsToDelete[ns])
 		if err != nil {
 			return errors.Wrapf(err, "error deleting MachineSets in namespace %q", ns)
 		}
@@ -633,27 +800,36 @@ func (c *client) DeleteMachineSets(namespace string) error {
 
 // DeleteMachines deletes all Machines in a namespace. If the namespace is empty then all Machines in all namespaces are deleted.
 func (c *client) DeleteMachines(namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	seen := make(map[string]bool)
+	machinesToDelete := make(map[string]*clusterv1.MachineList)
 
 	if namespace != "" {
 		seen[namespace] = true
 	} else {
-		machines, err := c.clientSet.ClusterV1alpha1().Machines("").List(metav1.ListOptions{})
+		machines := &clusterv1.MachineList{}
+		err := clientset.List(context.Background(), machines)
 		if err != nil {
 			return errors.Wrap(err, "error listing Machines in all namespaces")
 		}
-		for _, m := range machines.Items {
-			if _, ok := seen[m.Namespace]; !ok {
-				seen[m.Namespace] = true
+		for _, ms := range machines.Items {
+			if _, ok := seen[ms.Namespace]; !ok {
+				seen[ms.Namespace] = true
+				machinesToDelete[ms.Namespace].Items = append(machinesToDelete[ms.Namespace].Items, ms)
 			}
 		}
 	}
 	for ns := range seen {
-		err := c.clientSet.ClusterV1alpha1().Machines(ns).DeleteCollection(newDeleteOptions(), metav1.ListOptions{})
+		err = clientset.Delete(context.Background(), machinesToDelete[ns])
 		if err != nil {
 			return errors.Wrapf(err, "error deleting Machines in namespace %q", ns)
 		}
-		err = c.waitForMachinesDelete(ns)
+		err = c.waitForMachineSetsDelete(ns)
 		if err != nil {
 			return errors.Wrapf(err, "error waiting for Machine(s) deletion to complete in namespace %q", ns)
 		}
@@ -663,61 +839,111 @@ func (c *client) DeleteMachines(namespace string) error {
 }
 
 func (c *client) ForceDeleteMachine(namespace, name string) error {
-	machine, err := c.clientSet.ClusterV1alpha1().Machines(namespace).Get(name, metav1.GetOptions{})
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+	machine := clusterv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
+	}
+	namespacedName := types.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}
+
+	err = clientset.Get(context.Background(), namespacedName, &machine)
 	if err != nil {
 		return errors.Wrapf(err, "error getting Machine %s/%s", namespace, name)
 	}
 	machine.SetFinalizers([]string{})
-	if _, err := c.clientSet.ClusterV1alpha1().Machines(namespace).Update(machine); err != nil {
+	if err := clientset.Update(context.Background(), &machine); err != nil {
 		return errors.Wrapf(err, "error removing finalizer for Machine %s/%s", namespace, name)
 	}
-	if err := c.clientSet.ClusterV1alpha1().Machines(namespace).Delete(name, newDeleteOptions()); err != nil {
+	if err := clientset.Delete(context.Background(), &machine, ctrlclient.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil {
 		return errors.Wrapf(err, "error deleting Machine %s/%s", namespace, name)
 	}
 	return nil
 }
 
 func (c *client) ForceDeleteMachineSet(namespace, name string) error {
-	ms, err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).Get(name, metav1.GetOptions{})
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrapf(err, "error getting MachineSet %s/%s", namespace, name)
+		return errors.Wrap(err, "error creating config for core clientset")
 	}
-	ms.SetFinalizers([]string{})
-	if _, err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).Update(ms); err != nil {
-		return errors.Wrapf(err, "error removing finalizer for MachineSet %s/%s", namespace, name)
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+	machineSet := clusterv1.MachineSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
 	}
-	if err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).Delete(name, newDeleteOptions()); err != nil {
-		return errors.Wrapf(err, "error deleting MachineSet %s/%s", namespace, name)
+	namespacedName := types.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}
+
+	err = clientset.Get(context.Background(), namespacedName, &machineSet)
+	if err != nil {
+		return errors.Wrapf(err, "error getting Machine %s/%s", namespace, name)
+	}
+	machineSet.SetFinalizers([]string{})
+	if err := clientset.Update(context.Background(), &machineSet); err != nil {
+		return errors.Wrapf(err, "error removing finalizer for Machine %s/%s", namespace, name)
+	}
+	if err := clientset.Delete(context.Background(), &machineSet, ctrlclient.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil {
+		return errors.Wrapf(err, "error deleting Machine %s/%s", namespace, name)
 	}
 	return nil
 }
 
 func (c *client) ForceDeleteMachineDeployment(namespace, name string) error {
-	md, err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).Get(name, metav1.GetOptions{})
+	config, err := ctrl.GetConfig()
 	if err != nil {
-		return errors.Wrapf(err, "error getting MachineDeployment %s/%s", namespace, name)
+		return errors.Wrap(err, "error creating config for core clientset")
 	}
-	md.SetFinalizers([]string{})
-	if _, err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).Update(md); err != nil {
-		return errors.Wrapf(err, "error removing finalizer for MachineDeployment %s/%s", namespace, name)
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+	machineDeployment := clusterv1.MachineDeployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+		},
 	}
-	if err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).Delete(name, newDeleteOptions()); err != nil {
-		return errors.Wrapf(err, "error deleting MachineDeployment %s/%s", namespace, name)
+	namespacedName := types.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}
+
+	err = clientset.Get(context.Background(), namespacedName, &machineDeployment)
+	if err != nil {
+		return errors.Wrapf(err, "error getting Machine %s/%s", namespace, name)
+	}
+	machineDeployment.SetFinalizers([]string{})
+	if err := clientset.Update(context.Background(), &machineDeployment); err != nil {
+		return errors.Wrapf(err, "error removing finalizer for Machine %s/%s", namespace, name)
+	}
+	if err := clientset.Delete(context.Background(), &machineDeployment, ctrlclient.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil {
+		return errors.Wrapf(err, "error deleting Machine %s/%s", namespace, name)
 	}
 	return nil
-}
-
-func newDeleteOptions() *metav1.DeleteOptions {
-	propagationPolicy := metav1.DeletePropagationForeground
-	return &metav1.DeleteOptions{
-		PropagationPolicy: &propagationPolicy,
-	}
 }
 
 // UpdateClusterObjectEndpoint updates the status of a cluster API endpoint, clusterEndpoint
 // can be passed as hostname or hostname:port, if port is not present the default port 443 is applied.
 // TODO: Test this function
 func (c *client) UpdateClusterObjectEndpoint(clusterEndpoint, clusterName, namespace string) error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	cluster, err := c.GetCluster(clusterName, namespace)
 	if err != nil {
 		return err
@@ -738,7 +964,7 @@ func (c *client) UpdateClusterObjectEndpoint(clusterEndpoint, clusterName, names
 			Host: endpointHost,
 			Port: endpointPortInt,
 		})
-	_, err = c.clientSet.ClusterV1alpha1().Clusters(namespace).UpdateStatus(cluster)
+	err = clientset.Status().Update(context.Background(), cluster)
 	return err
 }
 
@@ -747,11 +973,19 @@ func (c *client) WaitForClusterV1alpha1Ready() error {
 }
 
 func (c *client) WaitForResourceStatuses() error {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
 	deadline := time.Now().Add(timeoutResourceReady)
 
 	timeout := time.Until(deadline)
 	return util.PollImmediate(retryIntervalResourceReady, timeout, func() (bool, error) {
 		klog.V(2).Info("Waiting for Cluster API resources to have statuses...")
+		clusters := &clusterv1.ClusterList{}
+		err = clientset.List(context.Background(), clusters)
 		clusters, err := c.clientSet.ClusterV1alpha1().Clusters("").List(metav1.ListOptions{})
 		if err != nil {
 			klog.V(10).Infof("retrying: failed to list clusters: %v", err)
@@ -812,13 +1046,22 @@ func (c *client) WaitForResourceStatuses() error {
 func (c *client) waitForClusterDelete(namespace string) error {
 	return util.PollImmediate(retryIntervalResourceDelete, timeoutResourceDelete, func() (bool, error) {
 		klog.V(2).Infof("Waiting for Clusters to be deleted...")
-		response, err := c.clientSet.ClusterV1alpha1().Clusters(namespace).List(metav1.ListOptions{})
+		clusters := &clusterv1.ClusterList{}
+		config, err := ctrl.GetConfig()
 		if err != nil {
+			return false, errors.Wrap(err, "error creating config for core clientset")
+		}
+
+		clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+		if err = clientset.List(context.Background(), clusters); err != nil {
+			return false, errors.Wrapf(err, "error listing cluster objects in namespace %q", namespace)
+		}
+
+		if len(clusters.Items) > 0 {
 			return false, nil
 		}
-		if len(response.Items) > 0 {
-			return false, nil
-		}
+
 		return true, nil
 	})
 }
@@ -826,13 +1069,22 @@ func (c *client) waitForClusterDelete(namespace string) error {
 func (c *client) waitForMachineClassesDelete(namespace string) error {
 	return util.PollImmediate(retryIntervalResourceDelete, timeoutResourceDelete, func() (bool, error) {
 		klog.V(2).Infof("Waiting for MachineClasses to be deleted...")
-		response, err := c.clientSet.ClusterV1alpha1().MachineClasses(namespace).List(metav1.ListOptions{})
+		machineClasses := &clusterv1.MachineClassList{}
+		config, err := ctrl.GetConfig()
 		if err != nil {
+			return false, errors.Wrap(err, "error creating config for core clientset")
+		}
+
+		clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+		if err = clientset.List(context.Background(), machineClasses); err != nil {
 			return false, nil
 		}
-		if len(response.Items) > 0 {
+
+		if len(machineClasses.Items) > 0 {
 			return false, nil
 		}
+
 		return true, nil
 	})
 }
@@ -840,11 +1092,18 @@ func (c *client) waitForMachineClassesDelete(namespace string) error {
 func (c *client) waitForMachineDeploymentsDelete(namespace string) error {
 	return util.PollImmediate(retryIntervalResourceDelete, timeoutResourceDelete, func() (bool, error) {
 		klog.V(2).Infof("Waiting for MachineDeployments to be deleted...")
-		response, err := c.clientSet.ClusterV1alpha1().MachineDeployments(namespace).List(metav1.ListOptions{})
+		machineDeployments := &clusterv1.MachineDeploymentList{}
+		config, err := ctrl.GetConfig()
 		if err != nil {
+			return false, errors.Wrap(err, "error creating config for core clientset")
+		}
+
+		clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+		if err = clientset.List(context.Background(), machineDeployments); err != nil {
 			return false, nil
 		}
-		if len(response.Items) > 0 {
+		if len(machineDeployments.Items) > 0 {
 			return false, nil
 		}
 		return true, nil
@@ -854,11 +1113,18 @@ func (c *client) waitForMachineDeploymentsDelete(namespace string) error {
 func (c *client) waitForMachineSetsDelete(namespace string) error {
 	return util.PollImmediate(retryIntervalResourceDelete, timeoutResourceDelete, func() (bool, error) {
 		klog.V(2).Infof("Waiting for MachineSets to be deleted...")
-		response, err := c.clientSet.ClusterV1alpha1().MachineSets(namespace).List(metav1.ListOptions{})
+		machineSets := &clusterv1.MachineSetList{}
+		config, err := ctrl.GetConfig()
 		if err != nil {
+			return false, errors.Wrap(err, "error creating config for core clientset")
+		}
+
+		clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+		if err = clientset.List(context.Background(), machineSets); err != nil {
 			return false, nil
 		}
-		if len(response.Items) > 0 {
+		if len(machineSets.Items) > 0 {
 			return false, nil
 		}
 		return true, nil
@@ -868,11 +1134,18 @@ func (c *client) waitForMachineSetsDelete(namespace string) error {
 func (c *client) waitForMachinesDelete(namespace string) error {
 	return util.PollImmediate(retryIntervalResourceDelete, timeoutResourceDelete, func() (bool, error) {
 		klog.V(2).Infof("Waiting for Machines to be deleted...")
-		response, err := c.clientSet.ClusterV1alpha1().Machines(namespace).List(metav1.ListOptions{})
+		machines := &clusterv1.MachineList{}
+		config, err := ctrl.GetConfig()
 		if err != nil {
+			return false, errors.Wrap(err, "error creating config for core clientset")
+		}
+
+		clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+		if err = clientset.List(context.Background(), machines); err != nil {
 			return false, nil
 		}
-		if len(response.Items) > 0 {
+		if len(machines.Items) > 0 {
 			return false, nil
 		}
 		return true, nil
@@ -882,12 +1155,16 @@ func (c *client) waitForMachinesDelete(namespace string) error {
 func (c *client) waitForMachineDelete(namespace, name string) error {
 	return util.PollImmediate(retryIntervalResourceDelete, timeoutResourceDelete, func() (bool, error) {
 		klog.V(2).Infof("Waiting for Machine %s/%s to be deleted...", namespace, name)
-		response, err := c.clientSet.ClusterV1alpha1().Machines(namespace).Get(name, metav1.GetOptions{})
+		machine := &clusterv1.Machine{}
+		config, err := ctrl.GetConfig()
 		if err != nil {
-			return false, nil
+			return false, errors.Wrap(err, "error creating config for core clientset")
 		}
-		if response != nil {
-			return false, nil
+
+		clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
+		if err = clientset.List(context.Background(), machine); err != nil && !apierrors.IsNotFound(err) {
+			return false, errors.Wrap(err, "error checking machine for deletion status ")
 		}
 		return true, nil
 	})
@@ -958,23 +1235,17 @@ func (c *client) waitForKubectlApply(manifest string) error {
 
 func waitForClusterResourceReady(cs clientset.Interface) error {
 	deadline := time.Now().Add(timeoutResourceReady)
-	err := util.PollImmediate(retryIntervalResourceReady, timeoutResourceReady, func() (bool, error) {
-		klog.V(2).Info("Waiting for Cluster v1alpha resources to become available...")
-		_, err := cs.Discovery().ServerResourcesForGroupVersion("cluster.k8s.io/v1alpha1")
-		if err == nil {
-			return true, nil
-		}
-		return false, nil
-	})
-
-	if err != nil {
-		return err
-	}
 	timeout := time.Until(deadline)
+	cluster := &clusterv1.ClusterList{}
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	return util.PollImmediate(retryIntervalResourceReady, timeout, func() (bool, error) {
 		klog.V(2).Info("Waiting for Cluster v1alpha resources to be listable...")
-		_, err := cs.ClusterV1alpha1().Clusters(apiv1.NamespaceDefault).List(metav1.ListOptions{})
-		if err == nil {
+		if err = clientset.List(context.Background(), cluster); err == nil {
 			return true, nil
 		}
 		return false, nil
@@ -983,6 +1254,12 @@ func waitForClusterResourceReady(cs clientset.Interface) error {
 
 func waitForMachineReady(cs clientset.Interface, machine *clusterv1.Machine) error {
 	timeout := timeoutMachineReady
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return errors.Wrap(err, "error creating config for core clientset")
+	}
+	clientset, err := ctrlclient.New(config, ctrlclient.Options{})
+
 	if p := os.Getenv(TimeoutMachineReady); p != "" {
 		t, err := strconv.Atoi(p)
 		if err == nil {
@@ -992,17 +1269,20 @@ func waitForMachineReady(cs clientset.Interface, machine *clusterv1.Machine) err
 		}
 	}
 
-	err := util.PollImmediate(retryIntervalResourceReady, timeout, func() (bool, error) {
+	err = util.PollImmediate(retryIntervalResourceReady, timeout, func() (bool, error) {
 		klog.V(2).Infof("Waiting for Machine %v to become ready...", machine.Name)
-		m, err := cs.ClusterV1alpha1().Machines(machine.Namespace).Get(machine.Name, metav1.GetOptions{})
-		if err != nil {
+		namespacedName := types.NamespacedName{
+			Namespace: machine.Namespace,
+			Name:      machine.Name,
+		}
+		if err = clientset.Get(context.Background(), namespacedName, machine); err != nil && !apierrors.IsNotFound(err) {
 			return false, nil
 		}
 
 		// TODO: update once machine controllers have a way to indicate a machine has been provisoned. https://github.com/kubernetes-sigs/cluster-api/issues/253
 		// Seeing a node cannot be purely relied upon because the provisioned control plane will not be registering with
 		// the stack that provisions it.
-		ready := m.Status.NodeRef != nil || len(m.Annotations) > 0
+		ready := machine.Status.NodeRef != nil || len(machine.Annotations) > 0
 		return ready, nil
 	})
 

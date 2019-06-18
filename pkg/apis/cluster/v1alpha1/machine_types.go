@@ -37,7 +37,7 @@ const (
 /// [Machine]
 // Machine is the Schema for the machines API
 // +k8s:openapi-gen=true
-// +kubebuilder:resource:shortName=ma
+// +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="ProviderID",type="string",JSONPath=".spec.providerID",description="Provider ID"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Machine status such as Terminating/Pending/Running/Failed etc"
@@ -238,6 +238,7 @@ type MachineVersionInfo struct {
 /// [MachineVersionInfo]
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 
 // MachineList contains a list of Machine
 type MachineList struct {
