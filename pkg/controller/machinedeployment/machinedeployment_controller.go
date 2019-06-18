@@ -57,7 +57,7 @@ type ReconcileMachineDeployment struct {
 
 // newReconciler returns a new reconcile.Reconciler.
 func newReconciler(mgr manager.Manager) *ReconcileMachineDeployment {
-	return &ReconcileMachineDeployment{Client: mgr.GetClient(), scheme: mgr.GetScheme(), recorder: mgr.GetRecorder(controllerName)}
+	return &ReconcileMachineDeployment{Client: mgr.GetClient(), scheme: mgr.GetScheme(), recorder: mgr.GetEventRecorderFor(controllerName)}
 }
 
 // Add creates a new MachineDeployment Controller and adds it to the Manager with default RBAC.
@@ -247,8 +247,7 @@ func (r *ReconcileMachineDeployment) getMachineSetsForDeployment(d *v1alpha1.Mac
 
 	// List all MachineSets to find those we own but that no longer match our selector.
 	machineSets := &v1alpha1.MachineSetList{}
-	listOptions := &client.ListOptions{Namespace: d.Namespace}
-	if err := r.Client.List(context.Background(), listOptions, machineSets); err != nil {
+	if err := r.Client.List(context.Background(), machineSets, client.InNamespace(d.Namespace)); err != nil {
 		return nil, err
 	}
 
@@ -315,8 +314,7 @@ func (r *ReconcileMachineDeployment) getMachineMapForDeployment(d *v1alpha1.Mach
 	}
 
 	machines := &v1alpha1.MachineList{}
-	listOptions := &client.ListOptions{Namespace: d.Namespace}
-	if err = r.Client.List(context.Background(), listOptions.MatchingLabels(selector), machines); err != nil {
+	if err = r.Client.List(context.Background(), machines, client.MatchingLabels(selector)); err != nil {
 		return nil, err
 	}
 
@@ -353,8 +351,7 @@ func (r *ReconcileMachineDeployment) getMachineDeploymentsForMachineSet(ms *v1al
 	}
 
 	dList := &v1alpha1.MachineDeploymentList{}
-	listOptions := &client.ListOptions{Namespace: ms.Namespace}
-	if err := r.Client.List(context.Background(), listOptions, dList); err != nil {
+	if err := r.Client.List(context.Background(), dList, client.InNamespace((ms.Namespace))); err != nil {
 		klog.Warningf("Failed to list machine deployments: %v", err)
 		return nil
 	}
