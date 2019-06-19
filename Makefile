@@ -71,9 +71,9 @@ deploy: manifests ## Deploy controller in the configured Kubernetes cluster in ~
 
 .PHONY: manifests
 manifests: ## Generate manifests e.g. CRD, RBAC etc.
-	go run vendor/sigs.k8s.io/controller-tools/cmd/controller-gen/main.go all
-	cp -f ./config/rbac/rbac*.yaml ./config/ci/rbac/
-	cp -f ./config/manager/manager*.yaml ./config/ci/manager/
+	$(CONTROLLER_GEN) "crd:trivialVersions=true" rbac:roleName=manager-role webhook paths="./pkg/apis/...;./pkg/controller/..." output:crd:artifacts:config=config/new/crd/bases
+	# cp -f ./config/rbac/rbac*.yaml ./config/ci/rbac/
+	# cp -f ./config/manager/manager*.yaml ./config/ci/manager/
 
 .PHONY: fmt
 fmt: ## Run go fmt against code
@@ -84,16 +84,26 @@ vet: ## Run go vet against code
 	go vet ./pkg/... ./cmd/...
 
 .PHONY: lint
-lint: dep-ensure ## Lint codebase
+lint: ## Lint codebase
 	bazel run //:lint $(BAZEL_ARGS)
 
-lint-full: dep-ensure ## Run slower linters to detect possible issues
+lint-full: ## Run slower linters to detect possible issues
 	bazel run //:lint-full $(BAZEL_ARGS)
 
 .PHONY: generate
-generate: clientset dep-ensure ## Generate code
+generate: controller-gen ## Generate code
+	$(CONTROLLER_GEN) object:headerFile=./hack/boilerplate/boilerplate.go.txt paths="./pkg/apis/...;./pkg/controller/..."
 	go generate ./pkg/... ./cmd/...
 	$(MAKE) gazelle
+
+.PHONY: controller-gen
+controller-gen:
+ifeq (, $(shell which controller-gen))
+	go get sigs.k8s.io/controller-tools/cmd/controller-gen@v0.2.0-beta.2
+CONTROLLER_GEN=$(shell go env GOPATH)/bin/controller-gen
+else
+CONTROLLER_GEN=$(shell which controller-gen)
+endif
 
 .PHONY: clientset
 clientset: ## Generate a typed clientset
