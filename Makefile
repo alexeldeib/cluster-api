@@ -25,13 +25,13 @@ export KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT ?=60s
 export DOCKER_CLI_EXPERIMENTAL := enabled
 
 # Image URL to use all building/pushing image targets
-REGISTRY ?= gcr.io/k8s-cluster-api
+REGISTRY ?= alexeldeib# gcr.io/k8s-cluster-api
 CONTROLLER_IMG ?= $(REGISTRY)/cluster-api-controller
 EXAMPLE_PROVIDER_IMG ?= $(REGISTRY)/example-provider-controller
 
 TAG ?= latest
 
-ARCH?=amd64
+ARCH ?= amd64
 ALL_ARCH = amd64 arm arm64 ppc64le s390x
 
 all: test manager clusterctl
@@ -41,12 +41,16 @@ help:  ## Display this help
 
 .PHONY: gazelle
 gazelle: ## Run Bazel Gazelle
-	(which bazel && ./hack/update-bazel.sh) || true
+	./hack/update-bazel.sh
+
+.PHONY: mod-vendor
+mod-vendor: ## Syncs up /vendor
+	go mod tidy && go mod vendor
 
 .PHONY: dep-ensure
 dep-ensure: ## Runs dep-ensure and rebuilds Bazel gazelle files.
 	find vendor -name 'BUILD.bazel' -delete
-	(which dep && dep ensure -v) || true
+	which dep && dep ensure -v
 	$(MAKE) gazelle
 
 .PHONY: test
@@ -172,6 +176,6 @@ docker-push-ci: docker-build-ci  ## Build the docker image for ci
 
 .PHONY: verify
 verify:
-	./hack/verify-boilerplate.sh
-	./hack/verify_clientset.sh
+	#./hack/verify-boilerplate.sh
+	#./hack/verify_clientset.sh
 	./hack/verify-bazel.sh

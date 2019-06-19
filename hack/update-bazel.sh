@@ -21,5 +21,5 @@ KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 export KUBE_ROOT
 
 cd "${KUBE_ROOT}"
-find "${KUBE_ROOT}/vendor" -name 'BUILD' -delete
+find "${KUBE_ROOT}/vendor" -name 'BUILD' -delete || true
 bazel run //:gazelle
