@@ -17,14 +17,15 @@ limitations under the License.
 package providercomponents
 
 import (
+	"context"
 	"io/ioutil"
 
 	"github.com/pkg/errors"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -36,18 +37,18 @@ type Store struct {
 	// If present the provider components will be loaded from and saved to this file
 	ExplicitPath string
 	// If present and ExplicitPath is not present, provider components will be loaded and saved to this store
-	ConfigMap v1.ConfigMapInterface
+	Client ctrlclient.Client
 }
 
-func NewFromConfigMap(configMap v1.ConfigMapInterface) (*Store, error) {
+func NewFromConfigMap(client ctrlclient.Client) (*Store, error) {
 	store := Store{
-		ConfigMap: configMap,
+		Client: client,
 	}
 	return &store, nil
 }
 
-func NewFromClientset(clientset *kubernetes.Clientset) (*Store, error) {
-	return NewFromConfigMap(clientset.CoreV1().ConfigMaps(core.NamespaceDefault))
+func NewFromClientset(client ctrlclient.Client) (*Store, error) {
+	return NewFromConfigMap(client)
 }
 
 func (pc *Store) Save(providerComponents string) error {
@@ -73,7 +74,12 @@ func (pc *Store) loadFromFile() (string, error) {
 }
 
 func (pc *Store) saveToConfigMap(providerComponents string) error {
-	configMap, err := pc.ConfigMap.Get(configMapName, meta.GetOptions{})
+	namespacedName := types.NamespacedName{
+		Namespace: core.NamespaceDefault,
+		Name:      configMapName,
+	}
+	configMap := &core.ConfigMap{}
+	err := pc.Client.Get(context.Background(), namespacedName, configMap)
 	if apierrors.IsNotFound(err) {
 		configMap = &core.ConfigMap{
 			ObjectMeta: meta.ObjectMeta{
@@ -88,12 +94,12 @@ func (pc *Store) saveToConfigMap(providerComponents string) error {
 	}
 	configMap.Data[configMapProviderComponentsKey] = providerComponents
 	if err == nil {
-		_, err = pc.ConfigMap.Update(configMap)
+		err = pc.Client.Update(context.Background(), configMap)
 		if err != nil {
 			return errors.Wrapf(err, "error updating config map %q", configMapName)
 		}
 	} else {
-		_, err = pc.ConfigMap.Create(configMap)
+		err = pc.Client.Create(context.Background(), configMap)
 		if err != nil {
 			return errors.Wrapf(err, "error creating config map %q", configMapName)
 		}
@@ -105,7 +111,8 @@ func (pc *Store) loadFromConfigMap() (string, error) {
 	if pc.ConfigMap == nil {
 		return "", errors.New("unable to load config map: need a valid ConfigMapInterface")
 	}
-	configMap, err := pc.ConfigMap.Get(configMapName, meta.GetOptions{})
+	configMap := &core.ConfigMap{}
+	err := pc.Client.Get(context.Background(), namespacedName, configMap)
 	if err != nil {
 		return "", errors.Wrapf(err, "error getting configmap named %q", configMapName)
 	}

@@ -17,14 +17,14 @@ limitations under the License.
 package clusterclient
 
 import (
-	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/cluster-api/cmd/clusterctl/clientcmd"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Factory can create cluster clients.
 type Factory interface {
 	NewClientFromKubeconfig(string) (Client, error)
-	NewCoreClientsetFromKubeconfigFile(string) (*kubernetes.Clientset, error)
+	NewCoreClientsetFromKubeconfigFile(string) (*ctrlclient.Client, error)
 }
 
 type clientFactory struct {
@@ -41,6 +41,11 @@ func (f *clientFactory) NewClientFromKubeconfig(kubeconfig string) (Client, erro
 }
 
 // NewCoreClientsetFromKubeconfigFile returns a new ClientSet from the Kubeconfig path passed as argument.
-func (f *clientFactory) NewCoreClientsetFromKubeconfigFile(kubeconfigPath string) (*kubernetes.Clientset, error) {
-	return clientcmd.NewCoreClientSetForDefaultSearchPath(kubeconfigPath, clientcmd.NewConfigOverrides())
+func (f *clientFactory) NewCoreClientsetFromKubeconfigFile(kubeconfigPath string) (*ctrlclient.Client, error) {
+	config, err := ctrl.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	result, err := ctrlclient.New(config, ctrlclient.Options{})
+	return &result, err
 }

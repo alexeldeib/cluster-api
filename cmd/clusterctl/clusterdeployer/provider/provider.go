@@ -17,8 +17,8 @@ limitations under the License.
 package provider
 
 import (
-	"k8s.io/client-go/kubernetes"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Deployer is a deprecated interface for Provider specific logic. Please do not extend or add. This interface should be removed
@@ -38,5 +38,5 @@ type ComponentsStore interface {
 
 // ComponentsStoreFactory is an interface for creating ComponentsStores
 type ComponentsStoreFactory interface {
-	NewFromCoreClientset(clientset *kubernetes.Clientset) (ComponentsStore, error)
+	NewFromCoreClientset(client *client.Client) (ComponentsStore, error)
 }
