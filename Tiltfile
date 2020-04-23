@@ -39,6 +39,7 @@ providers = {
             "errors",
             "third_party",
             "util",
+            "feature",
         ],
     },
     "kubeadm-bootstrap": {

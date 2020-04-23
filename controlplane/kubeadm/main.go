@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/cluster-api/cmd/version"
 	kubeadmcontrolplanev1alpha3 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha3"
 	kubeadmcontrolplanecontrollers "sigs.k8s.io/cluster-api/controlplane/kubeadm/controllers"
+	"sigs.k8s.io/cluster-api/feature"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -101,7 +102,10 @@ func InitFlags(fs *pflag.FlagSet) {
 
 	fs.IntVar(&webhookPort, "webhook-port", 0,
 		"Webhook Server port, disabled by default. When enabled, the manager will only work as webhook server, no reconcilers are installed.")
+
+	feature.MutableGates.AddFlag(fs)
 }
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
