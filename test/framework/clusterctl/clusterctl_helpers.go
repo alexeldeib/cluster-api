@@ -18,6 +18,7 @@ package clusterctl
 
 import (
 	"context"
+	"github.com/sanity-io/litter"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -142,7 +143,10 @@ func ApplyClusterTemplateAndWait(ctx context.Context, input ApplyClusterTemplate
 	Expect(workloadClusterTemplate).ToNot(BeNil(), "Failed to get the cluster template")
 
 	log.Logf("Applying the cluster template yaml to the cluster")
-	Expect(input.ClusterProxy.Apply(ctx, workloadClusterTemplate)).ShouldNot(HaveOccurred())
+	litter.Config.HidePrivateFields = false
+	err := input.ClusterProxy.Apply(ctx, workloadClusterTemplate)
+	litter.Dump(err.Error())
+	Expect(err).ShouldNot(HaveOccurred())
 
 	log.Logf("Waiting for the cluster infrastructure to be provisioned")
 	cluster := framework.DiscoveryAndWaitForCluster(ctx, framework.DiscoveryAndWaitForClusterInput{

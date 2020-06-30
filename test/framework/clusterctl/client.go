@@ -132,6 +132,8 @@ func ConfigCluster(ctx context.Context, input ConfigClusterInput) []byte {
 	yaml, err := template.Yaml()
 	Expect(err).ToNot(HaveOccurred(), "Failed to generate yaml for the workload cluster template")
 
+	fmt.Println(string(yaml))
+
 	log.WriteString(string(yaml))
 
 	return yaml
