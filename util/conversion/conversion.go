@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	fuzz "github.com/google/gofuzz"
 	"github.com/onsi/gomega"
 
@@ -159,7 +160,7 @@ func FuzzTestFunc(scheme *runtime.Scheme, hub conversion.Hub, dst conversion.Con
 			g.Expect(dstCopy.ConvertTo(after)).To(gomega.Succeed())
 
 			// Make sure that the hub before the conversions and after are the same, include a diff if not.
-			g.Expect(apiequality.Semantic.DeepEqual(hubCopy, after)).To(gomega.BeTrue(), cmp.Diff(hubCopy, after))
+			g.Expect(apiequality.Semantic.DeepEqual(hubCopy, after)).To(gomega.BeTrue(), cmp.Diff(hubCopy, after, []cmp.Option{cmpopts.EquateEmpty()}...))
 		}
 	}
 }
