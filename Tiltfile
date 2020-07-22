@@ -191,11 +191,9 @@ def enable_provider(name):
     )
 
     # Apply the kustomized yaml for this provider
-    yaml = str(kustomize_with_envsubst(context + "/config"))
     substitutions = settings.get("kustomize_substitutions", {})
-    for substitution in substitutions:
-        value = substitutions[substitution]
-        yaml = yaml.replace("${" + substitution + "}", value)
+    os.environ.update(substitutions)
+    yaml = str(kustomize_with_envsubst(context + "/config"))
 
     if yaml.count("${") == 0:
         k8s_yaml(blob(yaml))
