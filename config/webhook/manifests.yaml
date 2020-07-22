@@ -259,6 +259,46 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-exp-cluster-x-k8s-io-v1alpha3-clustertemplate
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: validation.exp.clustertemplate.cluster.x-k8s.io
+  rules:
+  - apiGroups:
+    - exp.cluster.x-k8s.io
+    apiVersions:
+    - v1alpha3
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - clustertemplates
+  sideEffects: None
+- clientConfig:
+    caBundle: Cg==
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-exp-cluster-x-k8s-io-v1alpha3-machinedeploymenttemplate
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: validation.exp.machinedeploymenttemplate.cluster.x-k8s.io
+  rules:
+  - apiGroups:
+    - exp.cluster.x-k8s.io
+    apiVersions:
+    - v1alpha3
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - machinedeploymenttemplates
+  sideEffects: None
+- clientConfig:
+    caBundle: Cg==
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-exp-cluster-x-k8s-io-v1alpha3-machinepool
   failurePolicy: Fail
   matchPolicy: Equivalent
