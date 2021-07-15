@@ -24,9 +24,10 @@ import (
 	"crypto/x509/pkix"
 	"fmt"
 	"math/big"
-	"sigs.k8s.io/cluster-api/util/collections"
 	"testing"
 	"time"
+
+	"sigs.k8s.io/cluster-api/util/collections"
 
 	. "github.com/onsi/gomega"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -78,10 +79,10 @@ func TestGetMachinesForCluster(t *testing.T) {
 func TestGetWorkloadCluster(t *testing.T) {
 	g := NewWithT(t)
 
-	ns, err := testEnv.CreateNamespace(ctx, "workload-cluster2")
+	ns, err := env.CreateNamespace(ctx, "workload-cluster2")
 	g.Expect(err).ToNot(HaveOccurred())
 	defer func() {
-		g.Expect(testEnv.Cleanup(ctx, ns)).To(Succeed())
+		g.Expect(env.Cleanup(ctx, ns)).To(Succeed())
 	}()
 
 	// Create an etcd secret with valid certs
@@ -106,8 +107,8 @@ func TestGetWorkloadCluster(t *testing.T) {
 	badCrtEtcdSecret := etcdSecret.DeepCopy()
 	badCrtEtcdSecret.Data[secret.TLSCrtDataName] = []byte("bad cert")
 	tracker, err := remote.NewClusterCacheTracker(
-		log.Log,
-		testEnv.Manager,
+		env.Manager,
+		remote.ClusterCacheTrackerOptions{Log: log.Log},
 	)
 	g.Expect(err).ToNot(HaveOccurred())
 
@@ -115,7 +116,7 @@ func TestGetWorkloadCluster(t *testing.T) {
 	// Store the envtest config as the contents of the kubeconfig secret.
 	// This way we are using the envtest environment as both the
 	// management and the workload cluster.
-	testEnvKubeconfig := kubeconfig.FromEnvTestConfig(testEnv.GetConfig(), &clusterv1.Cluster{
+	testEnvKubeconfig := kubeconfig.FromEnvTestConfig(env.GetConfig(), &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-cluster",
 			Namespace: ns.Name,
@@ -184,14 +185,14 @@ func TestGetWorkloadCluster(t *testing.T) {
 			g := NewWithT(t)
 
 			for _, o := range tt.objs {
-				g.Expect(testEnv.CreateObj(ctx, o)).To(Succeed())
+				g.Expect(env.Client.Create(ctx, o)).To(Succeed())
 				defer func(do client.Object) {
-					g.Expect(testEnv.Cleanup(ctx, do)).To(Succeed())
+					g.Expect(env.Cleanup(ctx, do)).To(Succeed())
 				}(o)
 			}
 
 			m := Management{
-				Client:  testEnv,
+				Client:  env,
 				Tracker: tracker,
 			}
 

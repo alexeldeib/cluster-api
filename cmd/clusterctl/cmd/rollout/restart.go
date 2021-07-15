@@ -64,7 +64,7 @@ func NewCmdRolloutRestart(cfgFile string) *cobra.Command {
 	return cmd
 }
 
-func runRestart(cfgFile string, cmd *cobra.Command, args []string) error {
+func runRestart(cfgFile string, _ *cobra.Command, args []string) error {
 	restartOpt.resources = args
 
 	c, err := client.New(cfgFile)
@@ -72,12 +72,9 @@ func runRestart(cfgFile string, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := c.RolloutRestart(client.RolloutOptions{
+	return c.RolloutRestart(client.RolloutOptions{
 		Kubeconfig: client.Kubeconfig{Path: restartOpt.kubeconfig, Context: restartOpt.kubeconfigContext},
 		Namespace:  restartOpt.namespace,
 		Resources:  restartOpt.resources,
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }

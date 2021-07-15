@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"sigs.k8s.io/cluster-api/util/collections"
 	"time"
 
 	"github.com/pkg/errors"
@@ -40,6 +39,7 @@ import (
 	kubedrain "sigs.k8s.io/cluster-api/third_party/kubernetes-drain"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
+	"sigs.k8s.io/cluster-api/util/collections"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -69,7 +69,7 @@ var (
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status;machines/finalizers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
 // MachineReconciler reconciles a Machine object.
@@ -107,14 +107,6 @@ func (r *MachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 	)
 	if err != nil {
 		return errors.Wrap(err, "failed to add Watch for Clusters to controller manager")
-	}
-
-	// Add index to Machine for listing by Node reference.
-	if err := mgr.GetCache().IndexField(ctx, &clusterv1.Machine{},
-		clusterv1.MachineNodeNameIndex,
-		r.indexMachineByNodeName,
-	); err != nil {
-		return errors.Wrap(err, "error setting index fields")
 	}
 
 	r.controller = controller
@@ -281,7 +273,7 @@ func (r *MachineReconciler) reconcileDelete(ctx context.Context, cluster *cluste
 	log := ctrl.LoggerFrom(ctx, "cluster", cluster.Name)
 
 	err := r.isDeleteNodeAllowed(ctx, cluster, m)
-	isDeleteNodeAllowed := err == nil
+	isDeleteNodeAllowed := err == nil //nolint:ifshort
 	if err != nil {
 		switch err {
 		case errNoControlPlaneNodes, errLastControlPlaneNode, errNilNodeRef, errClusterIsBeingDeleted, errControlPlaneIsBeingDeleted:
@@ -639,16 +631,13 @@ func (r *MachineReconciler) watchClusterNodes(ctx context.Context, cluster *clus
 		return nil
 	}
 
-	if err := r.Tracker.Watch(ctx, remote.WatchInput{
+	return r.Tracker.Watch(ctx, remote.WatchInput{
 		Name:         "machine-watchNodes",
 		Cluster:      util.ObjectKey(cluster),
 		Watcher:      r.controller,
 		Kind:         &corev1.Node{},
 		EventHandler: handler.EnqueueRequestsFromMapFunc(r.nodeToMachine),
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 func (r *MachineReconciler) nodeToMachine(o client.Object) []reconcile.Request {
@@ -657,12 +646,30 @@ func (r *MachineReconciler) nodeToMachine(o client.Object) []reconcile.Request {
 		panic(fmt.Sprintf("Expected a Node but got a %T", o))
 	}
 
+	// Match by nodeName and status.nodeRef.name.
+	filters := []client.ListOption{
+		client.MatchingFields{clusterv1.MachineNodeNameIndex: node.Name},
+	}
+
+	// Match by clusterName when the node has the annotation.
+	if clusterName, ok := node.GetAnnotations()[clusterv1.ClusterNameAnnotation]; ok {
+		filters = append(filters,
+			client.MatchingLabels{
+				clusterv1.ClusterLabelName: clusterName,
+			},
+		)
+	}
+
+	// Match by namespace when the node has the annotation.
+	if namespace, ok := node.GetAnnotations()[clusterv1.ClusterNamespaceAnnotation]; ok {
+		filters = append(filters, client.InNamespace(namespace))
+	}
+
 	machineList := &clusterv1.MachineList{}
 	if err := r.Client.List(
 		context.TODO(),
 		machineList,
-		client.MatchingFields{clusterv1.MachineNodeNameIndex: node.Name},
-	); err != nil {
+		filters...); err != nil {
 		return nil
 	}
 
@@ -672,19 +679,6 @@ func (r *MachineReconciler) nodeToMachine(o client.Object) []reconcile.Request {
 	}
 
 	return []reconcile.Request{{NamespacedName: util.ObjectKey(&machineList.Items[0])}}
-}
-
-func (r *MachineReconciler) indexMachineByNodeName(o client.Object) []string {
-	machine, ok := o.(*clusterv1.Machine)
-	if !ok {
-		panic(fmt.Sprintf("Expected a Machine but got a %T", o))
-	}
-
-	if machine.Status.NodeRef != nil {
-		return []string{machine.Status.NodeRef.Name}
-	}
-
-	return nil
 }
 
 // writer implements io.Writer interface as a pass-through for klog.

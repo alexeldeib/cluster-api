@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package util implements kubeadm utility functionality.
 package util
 
 import (
@@ -81,7 +82,7 @@ func (co ConfigOwner) IsMachinePool() bool {
 	return co.GetKind() == "MachinePool"
 }
 
-// Returns the Kuberentes version for the config owner object.
+// KubernetesVersion returns the Kuberentes version for the config owner object.
 func (co ConfigOwner) KubernetesVersion() string {
 	fields := []string{"spec", "version"}
 	if co.IsMachinePool() {

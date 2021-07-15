@@ -29,6 +29,8 @@ import (
 )
 
 const (
+	// ClusterFinalizer is the finalizer used by the cluster controller to
+	// cleanup the cluster resources when a Cluster is being deleted.
 	ClusterFinalizer = "cluster.cluster.x-k8s.io"
 )
 
@@ -87,6 +89,7 @@ type ClusterNetwork struct {
 // ANCHOR_END: ClusterNetwork
 
 // ANCHOR: NetworkRanges
+
 // NetworkRanges represents ranges of network addresses.
 type NetworkRanges struct {
 	CIDRBlocks []string `json:"cidrBlocks"`
@@ -210,10 +213,12 @@ type Cluster struct {
 	Status ClusterStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (c *Cluster) GetConditions() Conditions {
 	return c.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (c *Cluster) SetConditions(conditions Conditions) {
 	c.Status.Conditions = conditions
 }

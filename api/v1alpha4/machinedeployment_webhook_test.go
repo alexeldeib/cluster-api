@@ -22,6 +22,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	utildefaulting "sigs.k8s.io/cluster-api/util/defaulting"
 )
@@ -31,6 +32,13 @@ func TestMachineDeploymentDefault(t *testing.T) {
 	md := &MachineDeployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-md",
+		},
+		Spec: MachineDeploymentSpec{
+			Template: MachineTemplateSpec{
+				Spec: MachineSpec{
+					Version: pointer.String("1.19.10"),
+				},
+			},
 		},
 	}
 	t.Run("for MachineDeployment", utildefaulting.DefaultValidateTest(md))
@@ -47,13 +55,24 @@ func TestMachineDeploymentDefault(t *testing.T) {
 	g.Expect(md.Spec.Strategy.RollingUpdate).ToNot(BeNil())
 	g.Expect(md.Spec.Strategy.RollingUpdate.MaxSurge.IntValue()).To(Equal(1))
 	g.Expect(md.Spec.Strategy.RollingUpdate.MaxUnavailable.IntValue()).To(Equal(0))
+	g.Expect(*md.Spec.Template.Spec.Version).To(Equal("v1.19.10"))
 }
 
 func TestMachineDeploymentValidation(t *testing.T) {
+	badMaxSurge := intstr.FromString("1")
+	badMaxUnavailable := intstr.FromString("0")
+
+	goodMaxSurgePercentage := intstr.FromString("1%")
+	goodMaxUnavailablePercentage := intstr.FromString("0%")
+
+	goodMaxSurgeInt := intstr.FromInt(1)
+	goodMaxUnavailableInt := intstr.FromInt(0)
+
 	tests := []struct {
 		name      string
 		selectors map[string]string
 		labels    map[string]string
+		strategy  MachineDeploymentStrategy
 		expectErr bool
 	}{
 		{
@@ -86,6 +105,58 @@ func TestMachineDeploymentValidation(t *testing.T) {
 			labels:    map[string]string{"-123-foo": "bar"},
 			expectErr: true,
 		},
+		{
+			name:      "should return error for invalid maxSurge",
+			selectors: map[string]string{"foo": "bar"},
+			labels:    map[string]string{"foo": "bar"},
+			strategy: MachineDeploymentStrategy{
+				Type: RollingUpdateMachineDeploymentStrategyType,
+				RollingUpdate: &MachineRollingUpdateDeployment{
+					MaxUnavailable: &goodMaxUnavailableInt,
+					MaxSurge:       &badMaxSurge,
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name:      "should return error for invalid maxUnavailable",
+			selectors: map[string]string{"foo": "bar"},
+			labels:    map[string]string{"foo": "bar"},
+			strategy: MachineDeploymentStrategy{
+				Type: RollingUpdateMachineDeploymentStrategyType,
+				RollingUpdate: &MachineRollingUpdateDeployment{
+					MaxUnavailable: &badMaxUnavailable,
+					MaxSurge:       &goodMaxSurgeInt,
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name:      "should not return error for valid int maxSurge and maxUnavailable",
+			selectors: map[string]string{"foo": "bar"},
+			labels:    map[string]string{"foo": "bar"},
+			strategy: MachineDeploymentStrategy{
+				Type: RollingUpdateMachineDeploymentStrategyType,
+				RollingUpdate: &MachineRollingUpdateDeployment{
+					MaxUnavailable: &goodMaxUnavailableInt,
+					MaxSurge:       &goodMaxSurgeInt,
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:      "should not return error for valid percentage string maxSurge and maxUnavailable",
+			selectors: map[string]string{"foo": "bar"},
+			labels:    map[string]string{"foo": "bar"},
+			strategy: MachineDeploymentStrategy{
+				Type: RollingUpdateMachineDeploymentStrategyType,
+				RollingUpdate: &MachineRollingUpdateDeployment{
+					MaxUnavailable: &goodMaxUnavailablePercentage,
+					MaxSurge:       &goodMaxSurgePercentage,
+				},
+			},
+			expectErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -93,6 +164,7 @@ func TestMachineDeploymentValidation(t *testing.T) {
 			g := NewWithT(t)
 			md := &MachineDeployment{
 				Spec: MachineDeploymentSpec{
+					Strategy: &tt.strategy,
 					Selector: metav1.LabelSelector{
 						MatchLabels: tt.selectors,
 					},
@@ -103,6 +175,65 @@ func TestMachineDeploymentValidation(t *testing.T) {
 					},
 				},
 			}
+			if tt.expectErr {
+				g.Expect(md.ValidateCreate()).NotTo(Succeed())
+				g.Expect(md.ValidateUpdate(md)).NotTo(Succeed())
+			} else {
+				g.Expect(md.ValidateCreate()).To(Succeed())
+				g.Expect(md.ValidateUpdate(md)).To(Succeed())
+			}
+		})
+	}
+}
+
+func TestMachineDeploymentVersionValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		version   string
+		expectErr bool
+	}{
+		{
+			name:      "should succeed when given a valid semantic version with prepended 'v'",
+			version:   "v1.17.2",
+			expectErr: false,
+		},
+		{
+			name:      "should return error when given a valid semantic version without 'v'",
+			version:   "1.17.2",
+			expectErr: true,
+		},
+		{
+			name:      "should return error when given an invalid semantic version",
+			version:   "1",
+			expectErr: true,
+		},
+		{
+			name:      "should return error when given an invalid semantic version",
+			version:   "v1",
+			expectErr: true,
+		},
+		{
+			name:      "should return error when given an invalid semantic version",
+			version:   "wrong_version",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			md := &MachineDeployment{
+				Spec: MachineDeploymentSpec{
+
+					Template: MachineTemplateSpec{
+						Spec: MachineSpec{
+							Version: pointer.String(tt.version),
+						},
+					},
+				},
+			}
+
 			if tt.expectErr {
 				g.Expect(md.ValidateCreate()).NotTo(Succeed())
 				g.Expect(md.ValidateUpdate(md)).NotTo(Succeed())

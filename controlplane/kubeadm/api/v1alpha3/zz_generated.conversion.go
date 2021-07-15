@@ -23,7 +23,6 @@ package v1alpha3
 import (
 	unsafe "unsafe"
 
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	conversion "k8s.io/apimachinery/pkg/conversion"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	clusterapiapiv1alpha3 "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -160,24 +159,23 @@ func Convert_v1alpha4_KubeadmControlPlaneList_To_v1alpha3_KubeadmControlPlaneLis
 func autoConvert_v1alpha3_KubeadmControlPlaneSpec_To_v1alpha4_KubeadmControlPlaneSpec(in *KubeadmControlPlaneSpec, out *v1alpha4.KubeadmControlPlaneSpec, s conversion.Scope) error {
 	out.Replicas = (*int32)(unsafe.Pointer(in.Replicas))
 	out.Version = in.Version
-	out.InfrastructureTemplate = in.InfrastructureTemplate
+	// WARNING: in.InfrastructureTemplate requires manual conversion: does not exist in peer-type
 	if err := apiv1alpha3.Convert_v1alpha3_KubeadmConfigSpec_To_v1alpha4_KubeadmConfigSpec(&in.KubeadmConfigSpec, &out.KubeadmConfigSpec, s); err != nil {
 		return err
 	}
-	out.UpgradeAfter = (*v1.Time)(unsafe.Pointer(in.UpgradeAfter))
-	out.NodeDrainTimeout = (*v1.Duration)(unsafe.Pointer(in.NodeDrainTimeout))
+	// WARNING: in.UpgradeAfter requires manual conversion: does not exist in peer-type
+	// WARNING: in.NodeDrainTimeout requires manual conversion: does not exist in peer-type
 	return nil
 }
 
 func autoConvert_v1alpha4_KubeadmControlPlaneSpec_To_v1alpha3_KubeadmControlPlaneSpec(in *v1alpha4.KubeadmControlPlaneSpec, out *KubeadmControlPlaneSpec, s conversion.Scope) error {
 	out.Replicas = (*int32)(unsafe.Pointer(in.Replicas))
 	out.Version = in.Version
-	out.InfrastructureTemplate = in.InfrastructureTemplate
+	// WARNING: in.MachineTemplate requires manual conversion: does not exist in peer-type
 	if err := apiv1alpha3.Convert_v1alpha4_KubeadmConfigSpec_To_v1alpha3_KubeadmConfigSpec(&in.KubeadmConfigSpec, &out.KubeadmConfigSpec, s); err != nil {
 		return err
 	}
-	out.UpgradeAfter = (*v1.Time)(unsafe.Pointer(in.UpgradeAfter))
-	out.NodeDrainTimeout = (*v1.Duration)(unsafe.Pointer(in.NodeDrainTimeout))
+	// WARNING: in.RolloutAfter requires manual conversion: does not exist in peer-type
 	// WARNING: in.RolloutStrategy requires manual conversion: does not exist in peer-type
 	return nil
 }

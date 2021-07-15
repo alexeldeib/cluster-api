@@ -4,14 +4,15 @@ go 1.16
 
 require (
 	github.com/blang/semver v3.5.1+incompatible
-	github.com/drone/envsubst/v2 v2.0.0-20210305151453-490366e43a3c
-	github.com/golangci/golangci-lint v1.32.0
+	github.com/drone/envsubst/v2 v2.0.0-20210615175204-7bf45dbf5372
 	github.com/joelanford/go-apidiff v0.1.0
-	github.com/onsi/ginkgo v1.15.0
-	github.com/sergi/go-diff v1.1.0 // indirect
-	golang.org/x/tools v0.1.0
-	gotest.tools/gotestsum v1.6.3
-	k8s.io/code-generator v0.21.0-beta.0
-	sigs.k8s.io/controller-tools v0.5.0
-	sigs.k8s.io/kubebuilder/docs/book/utils v0.0.0-20200226075303-ed8438ec10a4
+	github.com/onsi/ginkgo v1.16.4
+	github.com/sergi/go-diff v1.2.0 // indirect
+	golang.org/x/exp v0.0.0-20210625193404-fa9d1d177d71 // indirect
+	golang.org/x/tools v0.1.4
+	gotest.tools/gotestsum v1.6.4
+	k8s.io/code-generator v0.21.2
+	sigs.k8s.io/controller-runtime/tools/setup-envtest v0.0.0-20210706144019-ef5c8a3ffd28
+	sigs.k8s.io/controller-tools v0.6.1
+	sigs.k8s.io/kubebuilder/docs/book/utils v0.0.0-20210702145813-742983631190
 )

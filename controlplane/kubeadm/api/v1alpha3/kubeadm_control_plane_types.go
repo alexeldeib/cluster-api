@@ -26,8 +26,13 @@ import (
 )
 
 const (
+	// KubeadmControlPlaneFinalizer is the finalizer applied to KubeadmControlPlane resources
+	// by its managing controller.
 	KubeadmControlPlaneFinalizer = "kubeadm.controlplane.cluster.x-k8s.io"
 
+	// KubeadmControlPlaneHashLabelKey was used to determine the hash of the
+	// template used to generate a control plane machine.
+	//
 	// Deprecated: This label has been deprecated and it's not in use anymore.
 	KubeadmControlPlaneHashLabelKey = "kubeadm.controlplane.cluster.x-k8s.io/hash"
 
@@ -157,10 +162,12 @@ type KubeadmControlPlane struct {
 	Status KubeadmControlPlaneStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (in *KubeadmControlPlane) GetConditions() clusterv1.Conditions {
 	return in.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (in *KubeadmControlPlane) SetConditions(conditions clusterv1.Conditions) {
 	in.Status.Conditions = conditions
 }

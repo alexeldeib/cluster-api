@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package rollout implements the clusterctl rollout command.
 package rollout
 
 import (
@@ -73,12 +74,9 @@ func runPause(cfgFile string, args []string) error {
 		return err
 	}
 
-	if err := c.RolloutPause(client.RolloutOptions{
+	return c.RolloutPause(client.RolloutOptions{
 		Kubeconfig: client.Kubeconfig{Path: pauseOpt.kubeconfig, Context: pauseOpt.kubeconfigContext},
 		Namespace:  pauseOpt.namespace,
 		Resources:  pauseOpt.resources,
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }

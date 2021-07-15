@@ -20,14 +20,12 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
@@ -40,7 +38,7 @@ func init() {
 	externalReadyWait = 1 * time.Second
 }
 
-var _ = Describe("Reconcile MachinePool Phases", func() {
+func TestReconcileMachinePoolPhases(t *testing.T) {
 	deletionTimestamp := metav1.Now()
 
 	var defaultKubeconfigSecret *corev1.Secret
@@ -108,141 +106,152 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 		},
 	}
 
-	BeforeEach(func() {
-		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(testEnv.Config, defaultCluster))
-	})
+	t.Run("Should set OwnerReference and cluster name label on external objects", func(t *testing.T) {
+		g := NewWithT(t)
 
-	It("Should set OwnerReference and cluster name label on external objects", func() {
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		r.reconcilePhase(machinepool)
 
-		Expect(r.Client.Get(ctx, types.NamespacedName{Name: bootstrapConfig.GetName(), Namespace: bootstrapConfig.GetNamespace()}, bootstrapConfig)).To(Succeed())
+		g.Expect(r.Client.Get(ctx, types.NamespacedName{Name: bootstrapConfig.GetName(), Namespace: bootstrapConfig.GetNamespace()}, bootstrapConfig)).To(Succeed())
 
-		Expect(bootstrapConfig.GetOwnerReferences()).To(HaveLen(1))
-		Expect(bootstrapConfig.GetLabels()[clusterv1.ClusterLabelName]).To(BeEquivalentTo("test-cluster"))
+		g.Expect(bootstrapConfig.GetOwnerReferences()).To(HaveLen(1))
+		g.Expect(bootstrapConfig.GetLabels()[clusterv1.ClusterLabelName]).To(BeEquivalentTo("test-cluster"))
 
-		Expect(r.Client.Get(ctx, types.NamespacedName{Name: infraConfig.GetName(), Namespace: infraConfig.GetNamespace()}, infraConfig)).To(Succeed())
+		g.Expect(r.Client.Get(ctx, types.NamespacedName{Name: infraConfig.GetName(), Namespace: infraConfig.GetNamespace()}, infraConfig)).To(Succeed())
 
-		Expect(infraConfig.GetOwnerReferences()).To(HaveLen(1))
-		Expect(infraConfig.GetLabels()[clusterv1.ClusterLabelName]).To(BeEquivalentTo("test-cluster"))
+		g.Expect(infraConfig.GetOwnerReferences()).To(HaveLen(1))
+		g.Expect(infraConfig.GetLabels()[clusterv1.ClusterLabelName]).To(BeEquivalentTo("test-cluster"))
 	})
 
-	It("Should set `Pending` with a new MachinePool", func() {
+	t.Run("Should set `Pending` with a new MachinePool", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhasePending))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhasePending))
 	})
 
-	It("Should set `Provisioning` when bootstrap is ready", func() {
+	t.Run("Should set `Provisioning` when bootstrap is ready", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseProvisioning))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseProvisioning))
 	})
 
-	It("Should set `Running` when bootstrap and infra is ready", func() {
+	t.Run("Should set `Running` when bootstrap and infra is ready", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set infra ready.
 		err = unstructured.SetNestedField(infraConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, int64(1), "status", "replicas")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedStringSlice(infraConfig.Object, []string{"test://machinepool-test-node"}, "spec", "providerIDList")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, "us-east-2a", "spec", "failureDomain")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set NodeRef.
 		machinepool.Status.NodeRefs = []corev1.ObjectReference{{Kind: "Node", Name: "machinepool-test-node"}}
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		// Set ReadyReplicas
 		machinepool.Status.ReadyReplicas = 1
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseRunning))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseRunning))
 	})
 
-	It("Should set `Running` when bootstrap, infra, and ready replicas equals spec replicas", func() {
+	t.Run("Should set `Running` when bootstrap, infra, and ready replicas equals spec replicas", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set infra ready.
 		err = unstructured.SetNestedStringSlice(infraConfig.Object, []string{"test://id-1"}, "spec", "providerIDList")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, int64(1), "status", "replicas")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, []interface{}{
 			map[string]interface{}{
@@ -254,85 +263,91 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 				"address": "10.0.0.2",
 			},
 		}, "addresses")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set NodeRef.
 		machinepool.Status.NodeRefs = []corev1.ObjectReference{{Kind: "Node", Name: "machinepool-test-node"}}
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		// Set ReadyReplicas
 		machinepool.Status.ReadyReplicas = 1
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseRunning))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseRunning))
 	})
 
-	It("Should set `Provisioned` when there is a NodeRef but infra is not ready ", func() {
+	t.Run("Should set `Provisioned` when there is a NodeRef but infra is not ready ", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set NodeRef.
 		machinepool.Status.NodeRefs = []corev1.ObjectReference{{Kind: "Node", Name: "machinepool-test-node"}}
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseProvisioned))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseProvisioned))
 	})
 
-	It("Should set `ScalingUp` when infra is scaling up", func() {
+	t.Run("Should set `ScalingUp` when infra is scaling up", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set infra ready.
 		err = unstructured.SetNestedStringSlice(infraConfig.Object, []string{"test://id-1"}, "spec", "providerIDList")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, int64(1), "status", "replicas")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set NodeRef.
 		machinepool.Status.NodeRefs = []corev1.ObjectReference{{Kind: "Node", Name: "machinepool-test-node"}}
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		// Set ReadyReplicas
 		machinepool.Status.ReadyReplicas = 1
@@ -341,30 +356,33 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 		machinepool.Spec.Replicas = pointer.Int32Ptr(5)
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseScalingUp))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseScalingUp))
 	})
 
-	It("Should set `ScalingDown` when infra is scaling down", func() {
+	t.Run("Should set `ScalingDown` when infra is scaling down", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set infra ready.
 		err = unstructured.SetNestedStringSlice(infraConfig.Object, []string{"test://id-1"}, "spec", "providerIDList")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, int64(4), "status", "replicas")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		machinepool.Spec.Replicas = pointer.Int32Ptr(4)
 
@@ -377,12 +395,12 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 		}
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		// Set ReadyReplicas
 		machinepool.Status.ReadyReplicas = 4
@@ -391,27 +409,30 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 		machinepool.Spec.Replicas = pointer.Int32Ptr(1)
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseScalingDown))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseScalingDown))
 	})
 
-	It("Should set `Deleting` when MachinePool is being deleted", func() {
+	t.Run("Should set `Deleting` when MachinePool is being deleted", func(t *testing.T) {
+		g := NewWithT(t)
+
+		defaultKubeconfigSecret = kubeconfig.GenerateSecret(defaultCluster, kubeconfig.FromEnvTestConfig(env.Config, defaultCluster))
 		machinepool := defaultMachinePool.DeepCopy()
 		bootstrapConfig := defaultBootstrap.DeepCopy()
 		infraConfig := defaultInfra.DeepCopy()
 
 		// Set bootstrap ready.
 		err := unstructured.SetNestedField(bootstrapConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(bootstrapConfig.Object, "secret-data", "status", "dataSecretName")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set infra ready.
 		err = unstructured.SetNestedStringSlice(infraConfig.Object, []string{"test://id-1"}, "spec", "providerIDList")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, true, "status", "ready")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		err = unstructured.SetNestedField(infraConfig.Object, []interface{}{
 			map[string]interface{}{
@@ -423,7 +444,7 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 				"address": "10.0.0.2",
 			},
 		}, "addresses")
-		Expect(err).NotTo(HaveOccurred())
+		g.Expect(err).NotTo(HaveOccurred())
 
 		// Set NodeRef.
 		machinepool.Status.NodeRefs = []corev1.ObjectReference{{Kind: "Node", Name: "machinepool-test-node"}}
@@ -432,17 +453,17 @@ var _ = Describe("Reconcile MachinePool Phases", func() {
 		machinepool.SetDeletionTimestamp(&deletionTimestamp)
 
 		r := &MachinePoolReconciler{
-			Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
+			Client: fake.NewClientBuilder().WithObjects(defaultCluster, defaultKubeconfigSecret, machinepool, bootstrapConfig, infraConfig).Build(),
 		}
 
 		res, err := r.reconcile(ctx, defaultCluster, machinepool)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Requeue).To(BeFalse())
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(res.Requeue).To(BeFalse())
 
 		r.reconcilePhase(machinepool)
-		Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseDeleting))
+		g.Expect(machinepool.Status.GetTypedPhase()).To(Equal(expv1.MachinePoolPhaseDeleting))
 	})
-})
+}
 
 func TestReconcileMachinePoolBootstrap(t *testing.T) {
 	defaultMachinePool := expv1.MachinePool{
@@ -666,16 +687,13 @@ func TestReconcileMachinePoolBootstrap(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
-
-			g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
-
 			if tc.machinepool == nil {
 				tc.machinepool = defaultMachinePool.DeepCopy()
 			}
 
 			bootstrapConfig := &unstructured.Unstructured{Object: tc.bootstrapConfig}
 			r := &MachinePoolReconciler{
-				Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(tc.machinepool, bootstrapConfig).Build(),
+				Client: fake.NewClientBuilder().WithObjects(tc.machinepool, bootstrapConfig).Build(),
 			}
 
 			res, err := r.reconcileBootstrap(ctx, defaultCluster, tc.machinepool)
@@ -876,15 +894,13 @@ func TestReconcileMachinePoolInfrastructure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
-
 			if tc.machinepool == nil {
 				tc.machinepool = defaultMachinePool.DeepCopy()
 			}
 
 			infraConfig := &unstructured.Unstructured{Object: tc.infraConfig}
 			r := &MachinePoolReconciler{
-				Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(tc.machinepool, infraConfig).Build(),
+				Client: fake.NewClientBuilder().WithObjects(tc.machinepool, infraConfig).Build(),
 			}
 
 			res, err := r.reconcileInfrastructure(ctx, defaultCluster, tc.machinepool)

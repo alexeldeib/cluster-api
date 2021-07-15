@@ -63,7 +63,7 @@ var (
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinesets;machinesets/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinesets;machinesets/status;machinesets/finalizers,verbs=get;list;watch;create;update;patch;delete
 
 // MachineSetReconciler reconciles a MachineSet object.
 type MachineSetReconciler struct {
@@ -361,6 +361,7 @@ func (r *MachineSetReconciler) syncReplicas(ctx context.Context, ms *clusterv1.M
 				Namespace:   machine.Namespace,
 				ClusterName: machine.Spec.ClusterName,
 				Labels:      machine.Labels,
+				Annotations: machine.Annotations,
 			})
 			if err != nil {
 				return errors.Wrapf(err, "failed to clone infrastructure configuration for MachineSet %q in namespace %q", ms.Name, ms.Namespace)
@@ -518,6 +519,9 @@ func (r *MachineSetReconciler) waitForMachineDeletion(ctx context.Context, machi
 // MachineToMachineSets is a handler.ToRequestsFunc to be used to enqeue requests for reconciliation
 // for MachineSets that might adopt an orphaned Machine.
 func (r *MachineSetReconciler) MachineToMachineSets(o client.Object) []ctrl.Request {
+	ctx := context.Background()
+	// This won't log unless the global logger is set
+	log := ctrl.LoggerFrom(ctx, "object", client.ObjectKeyFromObject(o))
 	result := []ctrl.Request{}
 
 	m, ok := o.(*clusterv1.Machine)
@@ -533,7 +537,11 @@ func (r *MachineSetReconciler) MachineToMachineSets(o client.Object) []ctrl.Requ
 		}
 	}
 
-	mss := r.getMachineSetsForMachine(context.TODO(), m)
+	mss, err := r.getMachineSetsForMachine(ctx, m)
+	if err != nil {
+		log.Error(err, "Failed getting MachineSets for Machine")
+		return nil
+	}
 	if len(mss) == 0 {
 		return nil
 	}
@@ -546,53 +554,25 @@ func (r *MachineSetReconciler) MachineToMachineSets(o client.Object) []ctrl.Requ
 	return result
 }
 
-func (r *MachineSetReconciler) getMachineSetsForMachine(ctx context.Context, m *clusterv1.Machine) []*clusterv1.MachineSet {
-	log := ctrl.LoggerFrom(ctx, "machine", m.Name)
-
+func (r *MachineSetReconciler) getMachineSetsForMachine(ctx context.Context, m *clusterv1.Machine) ([]*clusterv1.MachineSet, error) {
 	if len(m.Labels) == 0 {
-		log.Info("No machine sets found because it has no labels")
-		return nil
+		return nil, fmt.Errorf("machine %v has no labels, this is unexpected", client.ObjectKeyFromObject(m))
 	}
 
 	msList := &clusterv1.MachineSetList{}
-	err := r.Client.List(ctx, msList, client.InNamespace(m.Namespace))
-	if err != nil {
-		log.Error(err, "Failed to list machine sets")
-		return nil
+	if err := r.Client.List(ctx, msList, client.InNamespace(m.Namespace)); err != nil {
+		return nil, errors.Wrapf(err, "failed to list MachineSets")
 	}
 
 	var mss []*clusterv1.MachineSet
 	for idx := range msList.Items {
 		ms := &msList.Items[idx]
-		if r.hasMatchingLabels(ctx, ms, m) {
+		if hasMatchingLabels(ms.Spec.Selector, m.Labels) {
 			mss = append(mss, ms)
 		}
 	}
 
-	return mss
-}
-
-func (r *MachineSetReconciler) hasMatchingLabels(ctx context.Context, machineSet *clusterv1.MachineSet, machine *clusterv1.Machine) bool {
-	log := ctrl.LoggerFrom(ctx, "machine", machine.Name)
-
-	selector, err := metav1.LabelSelectorAsSelector(&machineSet.Spec.Selector)
-	if err != nil {
-		log.Error(err, "Unable to convert selector")
-		return false
-	}
-
-	// If a deployment with a nil or empty selector creeps in, it should match nothing, not everything.
-	if selector.Empty() {
-		log.V(2).Info("Machineset has empty selector")
-		return false
-	}
-
-	if !selector.Matches(labels.Set(machine.Labels)) {
-		log.V(4).Info("Machine has mismatch labels")
-		return false
-	}
-
-	return true
+	return mss, nil
 }
 
 func (r *MachineSetReconciler) shouldAdopt(ms *clusterv1.MachineSet) bool {
@@ -712,8 +692,5 @@ func reconcileExternalTemplateReference(ctx context.Context, c client.Client, re
 		UID:        cluster.UID,
 	}))
 
-	if err := patchHelper.Patch(ctx, obj); err != nil {
-		return err
-	}
-	return nil
+	return patchHelper.Patch(ctx, obj)
 }

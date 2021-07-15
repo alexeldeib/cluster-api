@@ -17,12 +17,11 @@ limitations under the License.
 package collections_test
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/cluster-api/util/collections"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"testing"
 	"time"
+
+	"sigs.k8s.io/cluster-api/util/collections"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	. "github.com/onsi/gomega"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -30,10 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-)
-
-var (
-	ctx = ctrl.SetupSignalHandler()
 )
 
 func falseFilter(_ *clusterv1.Machine) bool {
@@ -291,9 +286,6 @@ func TestMatchesKubernetesVersion(t *testing.T) {
 func TestGetFilteredMachinesForCluster(t *testing.T) {
 	g := NewWithT(t)
 
-	scheme := runtime.NewScheme()
-	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
-
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "my-namespace",
@@ -302,7 +294,6 @@ func TestGetFilteredMachinesForCluster(t *testing.T) {
 	}
 
 	c := fake.NewClientBuilder().
-		WithScheme(scheme).
 		WithObjects(cluster,
 			testControlPlaneMachine("first-machine"),
 			testMachine("second-machine"),

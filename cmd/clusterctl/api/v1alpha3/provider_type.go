@@ -27,7 +27,6 @@ import (
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".type"
 // +kubebuilder:printcolumn:name="Provider",type="string",JSONPath=".providerName"
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".version"
-// +kubebuilder:printcolumn:name="Watch Namespace",type="string",JSONPath=".watchedNamespace"
 
 // Provider defines an entry in the provider inventory.
 type Provider struct {
@@ -49,6 +48,7 @@ type Provider struct {
 
 	// WatchedNamespace indicates the namespace where the provider controller is is watching.
 	// if empty the provider controller is watching for objects in all namespaces.
+	// Deprecated: in clusterctl v1alpha4 all the providers watch all the namespaces; this field will be removed in a future version of this API
 	// +optional
 	WatchedNamespace string `json:"watchedNamespace,omitempty"`
 }
@@ -66,11 +66,6 @@ func (p *Provider) ManifestLabel() string {
 // instances of the same provider to be installed in the same namespace.
 func (p *Provider) InstanceName() string {
 	return types.NamespacedName{Namespace: p.Namespace, Name: p.ManifestLabel()}.String()
-}
-
-// HasWatchingOverlapWith returns true if the provider has an overlapping watching namespace with another provider.
-func (p *Provider) HasWatchingOverlapWith(other Provider) bool {
-	return p.WatchedNamespace == "" || p.WatchedNamespace == other.WatchedNamespace || other.WatchedNamespace == ""
 }
 
 // SameAs returns true if two providers have the same ProviderName and Type.
@@ -151,30 +146,35 @@ type ProviderList struct {
 	Items           []Provider `json:"items"`
 }
 
+// FilterByNamespace returns a new list of providers that reside in the namespace provided.
 func (l *ProviderList) FilterByNamespace(namespace string) []Provider {
 	return l.filterBy(func(p Provider) bool {
 		return p.Namespace == namespace
 	})
 }
 
+// FilterByProviderNameAndType returns a new list of provider that match the name and type.
 func (l *ProviderList) FilterByProviderNameAndType(provider string, providerType ProviderType) []Provider {
 	return l.filterBy(func(p Provider) bool {
 		return p.ProviderName == provider && p.Type == string(providerType)
 	})
 }
 
+// FilterByType returns a new list of providers that match the given type.
 func (l *ProviderList) FilterByType(providerType ProviderType) []Provider {
 	return l.filterBy(func(p Provider) bool {
 		return p.GetProviderType() == providerType
 	})
 }
 
+// FilterCore returns a new list of providers that are in the core.
 func (l *ProviderList) FilterCore() []Provider {
 	return l.filterBy(func(p Provider) bool {
 		return p.GetProviderType() == CoreProviderType
 	})
 }
 
+// FilterNonCore returns a new list of providers that are not in the core.
 func (l *ProviderList) FilterNonCore() []Provider {
 	return l.filterBy(func(p Provider) bool {
 		return p.GetProviderType() != CoreProviderType

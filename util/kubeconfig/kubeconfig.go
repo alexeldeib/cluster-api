@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package kubeconfig implements utilities for working with kubeconfigs.
 package kubeconfig
 
 import (
@@ -37,6 +38,7 @@ import (
 )
 
 var (
+	// ErrDependentCertificateNotFound signals that a CA secret could not be found.
 	ErrDependentCertificateNotFound = errors.New("could not find secret ca")
 )
 

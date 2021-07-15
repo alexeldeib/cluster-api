@@ -20,10 +20,8 @@ import (
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
-	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	cabpkv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
 	kubeadmv1beta1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
@@ -32,13 +30,7 @@ import (
 )
 
 func TestFuzzyConversion(t *testing.T) {
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(AddToScheme(scheme)).To(Succeed())
-	g.Expect(v1alpha4.AddToScheme(scheme)).To(Succeed())
-
 	t.Run("for KubeadmControlPLane", utilconversion.FuzzTestFunc(utilconversion.FuzzTestFuncInput{
-		Scheme:      scheme,
 		Hub:         &v1alpha4.KubeadmControlPlane{},
 		Spoke:       &KubeadmControlPlane{},
 		FuzzerFuncs: []fuzzer.FuzzerFuncs{fuzzFuncs},
@@ -59,6 +51,8 @@ func fuzzFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 	return []interface{}{
 		kubeadmBootstrapTokenStringFuzzer,
 		cabpkBootstrapTokenStringFuzzer,
+		dnsFuzzer,
+		kubeadmClusterConfigurationFuzzer,
 	}
 }
 
@@ -69,4 +63,18 @@ func kubeadmBootstrapTokenStringFuzzer(in *kubeadmv1beta1.BootstrapTokenString, 
 func cabpkBootstrapTokenStringFuzzer(in *cabpkv1.BootstrapTokenString, c fuzz.Continue) {
 	in.ID = "abcdef"
 	in.Secret = "abcdef0123456789"
+}
+
+func dnsFuzzer(obj *kubeadmv1beta1.DNS, c fuzz.Continue) {
+	c.FuzzNoCustom(obj)
+
+	// DNS.Type does not exists in v1alpha4, so setting it to empty string in order to avoid v1alpha3 --> v1alpha4 --> v1alpha3 round trip errors.
+	obj.Type = ""
+}
+
+func kubeadmClusterConfigurationFuzzer(obj *kubeadmv1beta1.ClusterConfiguration, c fuzz.Continue) {
+	c.FuzzNoCustom(obj)
+
+	// ClusterConfiguration.UseHyperKubeImage has been removed in v1alpha4, so setting it to false in order to avoid v1alpha3 --> v1alpha4 --> v1alpha3 round trip errors.
+	obj.UseHyperKubeImage = false
 }

@@ -56,6 +56,8 @@ type MachineHealthCheckSpec struct {
 
 	// Machines older than this duration without a node will be considered to have
 	// failed and will be remediated.
+	// If not set, this value is defaulted to 10 minutes.
+	// If you wish to disable this feature, set the value explicitly to 0.
 	// +optional
 	NodeStartupTimeout *metav1.Duration `json:"nodeStartupTimeout,omitempty"`
 
@@ -142,10 +144,12 @@ type MachineHealthCheck struct {
 	Status MachineHealthCheckStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (m *MachineHealthCheck) GetConditions() Conditions {
 	return m.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (m *MachineHealthCheck) SetConditions(conditions Conditions) {
 	m.Status.Conditions = conditions
 }

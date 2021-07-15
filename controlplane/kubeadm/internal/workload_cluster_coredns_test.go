@@ -19,28 +19,26 @@ package internal
 import (
 	"testing"
 
+	"github.com/blang/semver"
+	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
-
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
-	cabpkv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestUpdateCoreDNS(t *testing.T) {
 	validKCP := &controlplanev1.KubeadmControlPlane{
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
-			KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+			KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 				ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 					DNS: bootstrapv1.DNS{
-						Type: "",
 						ImageMeta: bootstrapv1.ImageMeta{
 							ImageRepository: "",
 							ImageTag:        "",
@@ -114,13 +112,14 @@ func TestUpdateCoreDNS(t *testing.T) {
 			Namespace: metav1.NamespaceSystem,
 		},
 		Data: map[string]string{
-			"ClusterConfiguration": `apiServer:
-apiVersion: kubeadm.k8s.io/v1beta2
-dns:
-  type: CoreDNS
-imageRepository: k8s.gcr.io
-kind: ClusterConfiguration
-`,
+			"ClusterConfiguration": yaml.Raw(`
+				apiServer:
+				apiVersion: kubeadm.k8s.io/v1beta2
+				dns:
+				  type: CoreDNS
+				imageRepository: k8s.gcr.io
+				kind: ClusterConfiguration
+				`),
 		},
 	}
 
@@ -142,11 +141,9 @@ kind: ClusterConfiguration
 					},
 				},
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
-							DNS: bootstrapv1.DNS{
-								Type: "",
-							},
+							DNS: bootstrapv1.DNS{},
 						},
 					},
 				},
@@ -158,23 +155,7 @@ kind: ClusterConfiguration
 			name: "returns early without error if KCP ClusterConfiguration is nil",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{},
-				},
-			},
-			objs:      []client.Object{badCM},
-			expectErr: false,
-		},
-		{
-			name: "returns early without error if KCP Cluster config DNS is not empty && not CoreDNS",
-			kcp: &controlplanev1.KubeadmControlPlane{
-				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
-						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
-							DNS: bootstrapv1.DNS{
-								Type: "foobarDNS",
-							},
-						},
-					},
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{},
 				},
 			},
 			objs:      []client.Object{badCM},
@@ -201,10 +182,9 @@ kind: ClusterConfiguration
 			name: "returns error if validation of CoreDNS image tag fails",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									// image is older than what's already
 									// installed.
@@ -223,10 +203,9 @@ kind: ClusterConfiguration
 			name: "returns error if unable to update CoreDNS image info in kubeadm config map",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									// provide an newer image to update to
 									ImageRepository: "k8s.gcr.io/some-folder/coredns",
@@ -245,10 +224,9 @@ kind: ClusterConfiguration
 			name: "returns error if unable to update CoreDNS corefile",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									// provide an newer image to update to
 									ImageRepository: "k8s.gcr.io/some-folder/coredns",
@@ -269,10 +247,9 @@ kind: ClusterConfiguration
 			name: "updates everything successfully",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									// provide an newer image to update to
 									ImageRepository: "k8s.gcr.io/some-repo",
@@ -295,10 +272,9 @@ kind: ClusterConfiguration
 			name: "updates everything successfully to v1.8.0 with a custom repo should not change the image name",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									// provide an newer image to update to
 									ImageRepository: "k8s.gcr.io/some-repo",
@@ -321,10 +297,9 @@ kind: ClusterConfiguration
 			name: "kubeadm defaults, upgrade from Kubernetes v1.18.x to v1.19.y (from k8s.gcr.io/coredns:1.6.7 to k8s.gcr.io/coredns:1.7.0)",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									ImageRepository: "k8s.gcr.io",
 									ImageTag:        "1.7.0",
@@ -346,10 +321,9 @@ kind: ClusterConfiguration
 			name: "kubeadm defaults, upgrade from Kubernetes v1.19.x to v1.20.y (stay on k8s.gcr.io/coredns:1.7.0)",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									ImageRepository: "k8s.gcr.io",
 									ImageTag:        "1.7.0",
@@ -370,10 +344,9 @@ kind: ClusterConfiguration
 			name: "kubeadm defaults, upgrade from Kubernetes v1.20.x to v1.21.y (from k8s.gcr.io/coredns:1.7.0 to k8s.gcr.io/coredns/coredns:v1.8.0)",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									ImageRepository: "k8s.gcr.io",
 									ImageTag:        "v1.8.0", // NOTE: ImageTags requires the v prefix
@@ -395,10 +368,9 @@ kind: ClusterConfiguration
 			name: "kubeadm defaults, upgrade from Kubernetes v1.21.x to v1.22.y (stay on k8s.gcr.io/coredns/coredns:v1.8.0)",
 			kcp: &controlplanev1.KubeadmControlPlane{
 				Spec: controlplanev1.KubeadmControlPlaneSpec{
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							DNS: bootstrapv1.DNS{
-								Type: bootstrapv1.CoreDNS,
 								ImageMeta: bootstrapv1.ImageMeta{
 									ImageRepository: "k8s.gcr.io",
 									ImageTag:        "v1.8.0", // NOTE: ImageTags requires the v prefix
@@ -426,36 +398,19 @@ kind: ClusterConfiguration
 			for _, o := range tt.objs {
 				// NB. deep copy test object so changes applied during a test does not affect other tests.
 				o := o.DeepCopyObject().(client.Object)
-				g.Expect(testEnv.Create(ctx, o)).To(Succeed())
-				// this makes sure that the cache is updated with the object
-				// to avoid 404 errors leading to test flakes
-				g.Eventually(func() bool {
-					err := testEnv.Get(ctx, client.ObjectKeyFromObject(o), o)
-					return err == nil
-				}, "10s").Should(BeTrue())
+				g.Expect(env.CreateAndWait(ctx, o)).To(Succeed())
 			}
 
 			// Register cleanup function
 			t.Cleanup(func() {
-				// Cleanup test objects (and wait for deletion to complete).
-				_ = testEnv.Cleanup(ctx, tt.objs...)
-				g.Eventually(func() bool {
-					for _, o := range tt.objs {
-						o := o.DeepCopyObject().(client.Object)
-						err := testEnv.Get(ctx, client.ObjectKeyFromObject(o), o)
-						if err == nil || (err != nil && !apierrors.IsNotFound(err)) {
-							return false
-						}
-					}
-					return true
-				}, "10s").Should(BeTrue())
+				_ = env.CleanupAndWait(ctx, tt.objs...)
 			})
 
 			w := &Workload{
-				Client:          testEnv.GetClient(),
+				Client:          env.GetClient(),
 				CoreDNSMigrator: tt.migrator,
 			}
-			err := w.UpdateCoreDNS(ctx, tt.kcp)
+			err := w.UpdateCoreDNS(ctx, tt.kcp, semver.MustParse("1.19.1"))
 
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
@@ -467,21 +422,32 @@ kind: ClusterConfiguration
 			if tt.expectUpdates {
 				// assert kubeadmConfigMap
 				var expectedKubeadmConfigMap corev1.ConfigMap
-				g.Expect(testEnv.Get(ctx, ctrlclient.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem}, &expectedKubeadmConfigMap)).To(Succeed())
+				g.Expect(env.Get(ctx, client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem}, &expectedKubeadmConfigMap)).To(Succeed())
 				g.Expect(expectedKubeadmConfigMap.Data).To(HaveKeyWithValue("ClusterConfiguration", ContainSubstring(tt.kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageTag)))
 				g.Expect(expectedKubeadmConfigMap.Data).To(HaveKeyWithValue("ClusterConfiguration", ContainSubstring(tt.kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageRepository)))
 
 				// assert CoreDNS corefile
 				var expectedConfigMap corev1.ConfigMap
-				g.Expect(testEnv.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
-				g.Expect(expectedConfigMap.Data).To(HaveLen(2))
-				g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile", "updated-core-file"))
-				g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile-backup", expectedCorefile))
+				g.Eventually(func() error {
+					if err := env.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap); err != nil {
+						return errors.Wrap(err, "failed to get the coredns ConfigMap")
+					}
+					if len(expectedConfigMap.Data) != 2 {
+						return errors.Errorf("the coredns ConfigMap has %d data items, expected 2", len(expectedConfigMap.Data))
+					}
+					if val, ok := expectedConfigMap.Data["Corefile"]; !ok || val != "updated-core-file" {
+						return errors.New("the coredns ConfigMap does not have the Corefile entry or this it has an unexpected value")
+					}
+					if val, ok := expectedConfigMap.Data["Corefile-backup"]; !ok || val != expectedCorefile {
+						return errors.New("the coredns ConfigMap does not have the Corefile-backup entry or this it has an unexpected value")
+					}
+					return nil
+				}, "5s").Should(BeNil())
 
 				// assert CoreDNS deployment
 				var actualDeployment appsv1.Deployment
 				g.Eventually(func() string {
-					g.Expect(testEnv.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &actualDeployment)).To(Succeed())
+					g.Expect(env.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &actualDeployment)).To(Succeed())
 					return actualDeployment.Spec.Template.Spec.Containers[0].Image
 				}, "5s").Should(Equal(tt.expectImage))
 			}
@@ -632,7 +598,7 @@ func TestUpdateCoreDNSCorefile(t *testing.T) {
 		g.Expect(fakeMigrator.migrateCalled).To(BeTrue())
 
 		var expectedConfigMap corev1.ConfigMap
-		g.Expect(fakeClient.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
+		g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
 		g.Expect(expectedConfigMap.Data).To(HaveLen(1))
 		g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile", originalCorefile))
 	})
@@ -663,7 +629,7 @@ func TestUpdateCoreDNSCorefile(t *testing.T) {
 		g.Expect(err).To(HaveOccurred())
 
 		var expectedConfigMap corev1.ConfigMap
-		g.Expect(fakeClient.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
+		g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
 		g.Expect(expectedConfigMap.Data).To(HaveLen(2))
 		g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile", originalCorefile))
 		g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile-backup", originalCorefile))
@@ -710,11 +676,11 @@ func TestUpdateCoreDNSCorefile(t *testing.T) {
 		}
 
 		var actualDeployment appsv1.Deployment
-		g.Expect(fakeClient.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &actualDeployment)).To(Succeed())
+		g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &actualDeployment)).To(Succeed())
 		g.Expect(actualDeployment.Spec.Template.Spec.Volumes).To(ConsistOf(expectedVolume))
 
 		var expectedConfigMap corev1.ConfigMap
-		g.Expect(fakeClient.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
+		g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
 		g.Expect(expectedConfigMap.Data).To(HaveLen(2))
 		g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile", "updated-core-file"))
 		g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("Corefile-backup", originalCorefile))
@@ -914,95 +880,64 @@ func TestGetCoreDNSInfo(t *testing.T) {
 }
 
 func TestUpdateCoreDNSImageInfoInKubeadmConfigMap(t *testing.T) {
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeadmConfigKey,
-			Namespace: metav1.NamespaceSystem,
-		},
-		Data: map[string]string{
-			"ClusterConfiguration": `apiServer:
-  extraArgs:
-    authorization-mode: Node,RBAC
-    cloud-provider: aws
-  timeoutForControlPlane: 4m0s
-apiVersion: kubeadm.k8s.io/v1beta2
-certificatesDir: /etc/kubernetes/pki
-clusterName: foobar
-controlPlaneEndpoint: foobar.us-east-2.elb.amazonaws.com
-controllerManager:
-  extraArgs:
-    cloud-provider: aws
-dns:
-  type: CoreDNS
-etcd:
-  local:
-    dataDir: /var/lib/etcd
-imageRepository: k8s.gcr.io
-kind: ClusterConfiguration
-kubernetesVersion: v1.16.1
-networking:
-  dnsDomain: cluster.local
-  podSubnet: 192.168.0.0/16
-  serviceSubnet: 10.96.0.0/12
-scheduler: {}`,
-		},
-	}
-
-	emptyCM := cm.DeepCopy()
-	delete(emptyCM.Data, "ClusterConfiguration")
-
-	dns := &bootstrapv1.DNS{
-		Type: bootstrapv1.CoreDNS,
-		ImageMeta: bootstrapv1.ImageMeta{
-			ImageRepository: "gcr.io/example",
-			ImageTag:        "1.0.1-somever.1",
-		},
-	}
-
 	tests := []struct {
-		name      string
-		dns       *bootstrapv1.DNS
-		objs      []client.Object
-		expectErr bool
+		name                     string
+		clusterConfigurationData string
+		newDNS                   bootstrapv1.DNS
+		wantClusterConfiguration string
 	}{
 		{
-			name:      "returns error if unable to find config map",
-			dns:       dns,
-			expectErr: true,
-		},
-		{
-			name:      "returns error if config map is empty",
-			objs:      []client.Object{emptyCM},
-			dns:       dns,
-			expectErr: true,
-		},
-		{
-			name:      "succeeds if updates correctly",
-			dns:       dns,
-			objs:      []client.Object{cm},
-			expectErr: false,
+			name: "it should set the DNS image config",
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterConfiguration
+				`),
+			newDNS: bootstrapv1.DNS{
+				ImageMeta: bootstrapv1.ImageMeta{
+					ImageRepository: "example.com/k8s",
+					ImageTag:        "v1.2.3",
+				},
+			},
+			wantClusterConfiguration: yaml.Raw(`
+				apiServer: {}
+				apiVersion: kubeadm.k8s.io/v1beta2
+				controllerManager: {}
+				dns:
+				  imageRepository: example.com/k8s
+				  imageTag: v1.2.3
+				etcd: {}
+				kind: ClusterConfiguration
+				networking: {}
+				scheduler: {}
+				`),
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithObjects(tt.objs...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: tt.clusterConfigurationData,
+				},
+			}).Build()
+
 			w := &Workload{
 				Client: fakeClient,
 			}
-
-			err := w.updateCoreDNSImageInfoInKubeadmConfigMap(ctx, tt.dns)
-			if tt.expectErr {
-				g.Expect(err).To(HaveOccurred())
-				return
-			}
+			err := w.updateCoreDNSImageInfoInKubeadmConfigMap(ctx, &tt.newDNS, semver.MustParse("1.19.1"))
 			g.Expect(err).ToNot(HaveOccurred())
 
-			var expectedConfigMap corev1.ConfigMap
-			g.Expect(fakeClient.Get(ctx, ctrlclient.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem}, &expectedConfigMap)).To(Succeed())
-			g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("ClusterConfiguration", ContainSubstring("1.0.1-somever.1")))
-			g.Expect(expectedConfigMap.Data).To(HaveKeyWithValue("ClusterConfiguration", ContainSubstring("gcr.io/example")))
+			var actualConfig corev1.ConfigMap
+			g.Expect(w.Client.Get(
+				ctx,
+				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
+				&actualConfig,
+			)).To(Succeed())
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.wantClusterConfiguration), cmp.Diff(tt.wantClusterConfiguration, actualConfig.Data[clusterConfigurationKey]))
 		})
 	}
 }
@@ -1120,7 +1055,7 @@ func TestUpdateCoreDNSDeployment(t *testing.T) {
 			}
 
 			var actualDeployment appsv1.Deployment
-			g.Expect(fakeClient.Get(ctx, ctrlclient.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &actualDeployment)).To(Succeed())
+			g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: coreDNSKey, Namespace: metav1.NamespaceSystem}, &actualDeployment)).To(Succeed())
 			// ensure the image is updated and the volumes point to the corefile
 			g.Expect(actualDeployment.Spec.Template.Spec.Containers[0].Image).To(Equal(tt.info.ToImage))
 			g.Expect(actualDeployment.Spec.Template.Spec.Volumes).To(ConsistOf(expectedVolume))

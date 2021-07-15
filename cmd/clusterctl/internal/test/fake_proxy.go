@@ -42,7 +42,7 @@ type FakeProxy struct {
 }
 
 var (
-	FakeScheme = runtime.NewScheme()
+	FakeScheme = runtime.NewScheme() //nolint:revive
 )
 
 func init() {
@@ -142,26 +142,25 @@ func (f *FakeProxy) WithNamespace(n string) *FakeProxy {
 // NB. this method adds an items to the Provider inventory, but it doesn't install the corresponding provider; if the
 // test case requires the actual provider to be installed, use the the fake client to install both the provider
 // components and the corresponding inventory item.
-func (f *FakeProxy) WithProviderInventory(name string, providerType clusterctlv1.ProviderType, version, targetNamespace, watchingNamespace string) *FakeProxy {
+func (f *FakeProxy) WithProviderInventory(name string, providerType clusterctlv1.ProviderType, version, targetNamespace string) *FakeProxy {
 	f.objs = append(f.objs, &clusterctlv1.Provider{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: clusterctlv1.GroupVersion.String(),
 			Kind:       "Provider",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			ResourceVersion: "1",
+			ResourceVersion: "999",
 			Namespace:       targetNamespace,
 			Name:            clusterctlv1.ManifestLabel(name, providerType),
 			Labels: map[string]string{
 				clusterctlv1.ClusterctlLabelName:     "",
 				clusterv1.ProviderLabelName:          clusterctlv1.ManifestLabel(name, providerType),
-				clusterctlv1.ClusterctlCoreLabelName: "inventory",
+				clusterctlv1.ClusterctlCoreLabelName: clusterctlv1.ClusterctlCoreLabelInventoryValue,
 			},
 		},
-		ProviderName:     name,
-		Type:             string(providerType),
-		Version:          version,
-		WatchedNamespace: watchingNamespace,
+		ProviderName: name,
+		Type:         string(providerType),
+		Version:      version,
 	})
 
 	return f

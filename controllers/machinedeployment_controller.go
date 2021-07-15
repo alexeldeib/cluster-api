@@ -49,7 +49,7 @@ var (
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinedeployments;machinedeployments/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinedeployments;machinedeployments/status;machinedeployments/finalizers,verbs=get;list;watch;create;update;patch;delete
 
 // MachineDeploymentReconciler reconciles a MachineDeployment object.
 type MachineDeploymentReconciler struct {
@@ -195,7 +195,14 @@ func (r *MachineDeploymentReconciler) reconcile(ctx context.Context, cluster *cl
 		return ctrl.Result{}, r.sync(ctx, d, msList)
 	}
 
+	if d.Spec.Strategy == nil {
+		return ctrl.Result{}, errors.Errorf("missing MachineDeployment strategy")
+	}
+
 	if d.Spec.Strategy.Type == clusterv1.RollingUpdateMachineDeploymentStrategyType {
+		if d.Spec.Strategy.RollingUpdate == nil {
+			return ctrl.Result{}, errors.Errorf("missing MachineDeployment settings for strategy type: %s", d.Spec.Strategy.Type)
+		}
 		return ctrl.Result{}, r.rolloutRolling(ctx, d, msList)
 	}
 
@@ -299,7 +306,7 @@ func (r *MachineDeploymentReconciler) getMachineDeploymentsForMachineSet(ctx con
 	return deployments
 }
 
-// MachineSetTodeployments is a handler.ToRequestsFunc to be used to enqeue requests for reconciliation
+// MachineSetToDeployments is a handler.ToRequestsFunc to be used to enqueue requests for reconciliation
 // for MachineDeployments that might adopt an orphaned MachineSet.
 func (r *MachineDeploymentReconciler) MachineSetToDeployments(o client.Object) []ctrl.Request {
 	result := []ctrl.Request{}

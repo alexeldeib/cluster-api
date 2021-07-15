@@ -25,7 +25,7 @@ import (
 
 const (
 	// MachinePoolFinalizer is used to ensure deletion of dependencies (nodes, infra).
-	MachinePoolFinalizer = "machinepool.exp.cluster.x-k8s.io"
+	MachinePoolFinalizer = "machinepool.cluster.x-k8s.io"
 )
 
 // ANCHOR: MachinePoolSpec
@@ -216,10 +216,12 @@ type MachinePool struct {
 	Status MachinePoolStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (m *MachinePool) GetConditions() clusterv1.Conditions {
 	return m.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (m *MachinePool) SetConditions(conditions clusterv1.Conditions) {
 	m.Status.Conditions = conditions
 }

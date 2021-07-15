@@ -50,13 +50,14 @@ import (
 )
 
 var (
+	// ErrSecretTypeNotSupported signals that a Secret is not supported.
 	ErrSecretTypeNotSupported = errors.New("unsupported secret type")
 )
 
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=addons.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=addons.cluster.x-k8s.io,resources=clusterresourcesets/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=addons.cluster.x-k8s.io,resources=clusterresourcesets/status;clusterresourcesets/finalizers,verbs=get;update;patch
 
 // ClusterResourceSetReconciler reconciles a ClusterResourceSet object.
 type ClusterResourceSetReconciler struct {
@@ -85,7 +86,7 @@ func (r *ClusterResourceSetReconciler) SetupWithManager(ctx context.Context, mgr
 			handler.EnqueueRequestsFromMapFunc(r.resourceToClusterResourceSet),
 			builder.OnlyMetadata,
 			builder.WithPredicates(
-				resourcepredicates.AddonsSecretCreate(ctrl.LoggerFrom(ctx)),
+				resourcepredicates.ResourceCreate(ctrl.LoggerFrom(ctx)),
 			),
 		).
 		WithOptions(options).
@@ -406,8 +407,8 @@ func (r *ClusterResourceSetReconciler) patchOwnerRefToResource(ctx context.Conte
 		UID:        clusterResourceSet.GetUID(),
 	}
 
-	refs := resource.GetOwnerReferences()
 	if !util.IsOwnedByObject(resource, clusterResourceSet) {
+		refs := resource.GetOwnerReferences()
 		patch := client.MergeFrom(resource.DeepCopy())
 		refs = append(refs, newRef)
 		resource.SetOwnerReferences(refs)

@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package yaml implements yaml utility functions.
 package yaml
 
 import (
@@ -21,7 +22,9 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/MakeNowJust/heredoc"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,6 +38,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// ExtractClusterReferences returns the references in a Cluster object.
 func ExtractClusterReferences(out *ParseOutput, c *clusterv1.Cluster) (res []*unstructured.Unstructured) {
 	if c.Spec.InfrastructureRef == nil {
 		return nil
@@ -45,6 +49,7 @@ func ExtractClusterReferences(out *ParseOutput, c *clusterv1.Cluster) (res []*un
 	return
 }
 
+// ExtractMachineReferences returns the references in a Machine object.
 func ExtractMachineReferences(out *ParseOutput, m *clusterv1.Machine) (res []*unstructured.Unstructured) {
 	if obj := out.FindUnstructuredReference(&m.Spec.InfrastructureRef); obj != nil {
 		res = append(res, obj)
@@ -57,10 +62,7 @@ func ExtractMachineReferences(out *ParseOutput, m *clusterv1.Machine) (res []*un
 	return
 }
 
-type ParseInput struct {
-	File string
-}
-
+// ParseOutput is the output given from the Parse function.
 type ParseOutput struct {
 	Clusters            []*clusterv1.Cluster
 	Machines            []*clusterv1.Machine
@@ -89,6 +91,11 @@ func (p *ParseOutput) FindUnstructuredReference(ref *corev1.ObjectReference) *un
 		}
 	}
 	return nil
+}
+
+// ParseInput is an input struct for the Parse function.
+type ParseInput struct {
+	File string
 }
 
 // Parse extracts runtime objects from a file.
@@ -177,6 +184,7 @@ func (d *yamlDecoder) Close() error {
 	return d.close()
 }
 
+// NewYAMLDecoder returns a new streaming Decoded that supports YAML.
 func NewYAMLDecoder(r io.ReadCloser) streaming.Decoder {
 	return &yamlDecoder{
 		reader:  apiyaml.NewYAMLReader(bufio.NewReader(r)),
@@ -261,4 +269,10 @@ func FromUnstructured(objs []unstructured.Unstructured) ([]byte, error) {
 	}
 
 	return JoinYaml(ret...), nil
+}
+
+// Raw returns un-indented yaml string; it also remove the first empty line, if any.
+// While writing yaml, always use space instead of tabs for indentation.
+func Raw(raw string) string {
+	return strings.TrimPrefix(heredoc.Doc(raw), "\n")
 }

@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/util/container"
 	"sigs.k8s.io/cluster-api/util/version"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -42,8 +41,8 @@ func (in *KubeadmControlPlane) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:verbs=create;update,path=/mutate-controlplane-cluster-x-k8s-io-v1alpha4-kubeadmcontrolplane,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,versions=v1alpha4,name=default.kubeadmcontrolplane.controlplane.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1beta1
-// +kubebuilder:webhook:verbs=create;update,path=/validate-controlplane-cluster-x-k8s-io-v1alpha4-kubeadmcontrolplane,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes;kubeadmcontrolplanes/scale,versions=v1alpha4,name=validation.kubeadmcontrolplane.controlplane.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1beta1
+// +kubebuilder:webhook:verbs=create;update,path=/mutate-controlplane-cluster-x-k8s-io-v1alpha4-kubeadmcontrolplane,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes,versions=v1alpha4,name=default.kubeadmcontrolplane.controlplane.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
+// +kubebuilder:webhook:verbs=create;update,path=/validate-controlplane-cluster-x-k8s-io-v1alpha4-kubeadmcontrolplane,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=controlplane.cluster.x-k8s.io,resources=kubeadmcontrolplanes;kubeadmcontrolplanes/scale,versions=v1alpha4,name=validation.kubeadmcontrolplane.controlplane.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 var _ webhook.Defaulter = &KubeadmControlPlane{}
 var _ webhook.Validator = &KubeadmControlPlane{}
@@ -55,8 +54,8 @@ func (in *KubeadmControlPlane) Default() {
 		in.Spec.Replicas = &replicas
 	}
 
-	if in.Spec.InfrastructureTemplate.Namespace == "" {
-		in.Spec.InfrastructureTemplate.Namespace = in.Namespace
+	if in.Spec.MachineTemplate.InfrastructureRef.Namespace == "" {
+		in.Spec.MachineTemplate.InfrastructureRef.Namespace = in.Namespace
 	}
 
 	if !strings.HasPrefix(in.Spec.Version, "v") {
@@ -108,12 +107,13 @@ const (
 	apiServer            = "apiServer"
 	controllerManager    = "controllerManager"
 	scheduler            = "scheduler"
+	ntp                  = "ntp"
 )
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (in *KubeadmControlPlane) ValidateUpdate(old runtime.Object) error {
 	// add a * to indicate everything beneath is ok.
-	// For example, {"spec", "*"} will allow any path under "spec" to change, such as spec.infrastructureTemplate.name
+	// For example, {"spec", "*"} will allow any path under "spec" to change.
 	allowedPaths := [][]string{
 		{"metadata", "*"},
 		{spec, kubeadmConfigSpec, clusterConfiguration, "etcd", "local", "imageRepository"},
@@ -131,10 +131,12 @@ func (in *KubeadmControlPlane) ValidateUpdate(old runtime.Object) error {
 		{spec, kubeadmConfigSpec, files},
 		{spec, kubeadmConfigSpec, "verbosity"},
 		{spec, kubeadmConfigSpec, users},
-		{spec, "infrastructureTemplate", "name"},
+		{spec, kubeadmConfigSpec, ntp, "*"},
+		{spec, "machineTemplate", "metadata"},
+		{spec, "machineTemplate", "infrastructureRef", "name"},
 		{spec, "replicas"},
 		{spec, "version"},
-		{spec, "upgradeAfter"},
+		{spec, "rolloutAfter"},
 		{spec, "nodeDrainTimeout"},
 		{spec, "rolloutStrategy", "*"},
 	}
@@ -275,12 +277,32 @@ func (in *KubeadmControlPlane) validateCommon() (allErrs field.ErrorList) {
 		}
 	}
 
-	if in.Spec.InfrastructureTemplate.Namespace != in.Namespace {
+	if in.Spec.MachineTemplate.InfrastructureRef.APIVersion == "" {
 		allErrs = append(
 			allErrs,
 			field.Invalid(
-				field.NewPath("spec", "infrastructureTemplate", "namespace"),
-				in.Spec.InfrastructureTemplate.Namespace,
+				field.NewPath("spec", "machineTemplate", "infrastructure", "apiVersion"),
+				in.Spec.MachineTemplate.InfrastructureRef.APIVersion,
+				"cannot be empty",
+			),
+		)
+	}
+	if in.Spec.MachineTemplate.InfrastructureRef.Kind == "" {
+		allErrs = append(
+			allErrs,
+			field.Invalid(
+				field.NewPath("spec", "machineTemplate", "infrastructure", "kind"),
+				in.Spec.MachineTemplate.InfrastructureRef.Kind,
+				"cannot be empty",
+			),
+		)
+	}
+	if in.Spec.MachineTemplate.InfrastructureRef.Namespace != in.Namespace {
+		allErrs = append(
+			allErrs,
+			field.Invalid(
+				field.NewPath("spec", "machineTemplate", "infrastructure", "namespace"),
+				in.Spec.MachineTemplate.InfrastructureRef.Namespace,
 				"must match metadata.namespace",
 			),
 		)
@@ -351,15 +373,11 @@ func (in *KubeadmControlPlane) validateCoreDNSVersion(prev *KubeadmControlPlane)
 	if in.Spec.KubeadmConfigSpec.ClusterConfiguration == nil || prev.Spec.KubeadmConfigSpec.ClusterConfiguration == nil {
 		return allErrs
 	}
-	//return if either current or target versions is empty
+	// return if either current or target versions is empty
 	if prev.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageTag == "" || in.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageTag == "" {
 		return allErrs
 	}
 	targetDNS := &in.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS
-	//return if the type is anything other than empty (default), or CoreDNS.
-	if targetDNS.Type != "" && targetDNS.Type != bootstrapv1.CoreDNS {
-		return allErrs
-	}
 
 	fromVersion, err := version.ParseMajorMinorPatchTolerant(prev.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageTag)
 	if err != nil {

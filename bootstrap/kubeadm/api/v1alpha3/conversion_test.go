@@ -20,37 +20,31 @@ import (
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
-	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
-
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
 	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
 )
 
 func TestFuzzyConversion(t *testing.T) {
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(AddToScheme(scheme)).To(Succeed())
-	g.Expect(v1alpha4.AddToScheme(scheme)).To(Succeed())
-
 	t.Run("for KubeadmConfig", utilconversion.FuzzTestFunc(utilconversion.FuzzTestFuncInput{
-		Scheme:      scheme,
 		Hub:         &v1alpha4.KubeadmConfig{},
 		Spoke:       &KubeadmConfig{},
-		FuzzerFuncs: []fuzzer.FuzzerFuncs{KubeadmConfigStatusFuzzFuncs},
+		FuzzerFuncs: []fuzzer.FuzzerFuncs{fuzzFuncs},
 	}))
 	t.Run("for KubeadmConfigTemplate", utilconversion.FuzzTestFunc(utilconversion.FuzzTestFuncInput{
-		Scheme: scheme,
-		Hub:    &v1alpha4.KubeadmConfigTemplate{},
-		Spoke:  &KubeadmConfigTemplate{},
+		Hub:         &v1alpha4.KubeadmConfigTemplate{},
+		Spoke:       &KubeadmConfigTemplate{},
+		FuzzerFuncs: []fuzzer.FuzzerFuncs{fuzzFuncs},
 	}))
 }
 
-func KubeadmConfigStatusFuzzFuncs(_ runtimeserializer.CodecFactory) []interface{} {
+func fuzzFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 	return []interface{}{
 		KubeadmConfigStatusFuzzer,
+		dnsFuzzer,
+		clusterConfigurationFuzzer,
 	}
 }
 
@@ -59,4 +53,18 @@ func KubeadmConfigStatusFuzzer(obj *KubeadmConfigStatus, c fuzz.Continue) {
 
 	// KubeadmConfigStatus.BootstrapData has been removed in v1alpha4, so setting it to nil in order to avoid v1alpha3 --> v1alpha4 --> v1alpha3 round trip errors.
 	obj.BootstrapData = nil
+}
+
+func dnsFuzzer(obj *v1beta1.DNS, c fuzz.Continue) {
+	c.FuzzNoCustom(obj)
+
+	// DNS.Type does not exists in v1alpha4, so setting it to empty string in order to avoid v1alpha3 --> v1alpha4 --> v1alpha3 round trip errors.
+	obj.Type = ""
+}
+
+func clusterConfigurationFuzzer(obj *v1beta1.ClusterConfiguration, c fuzz.Continue) {
+	c.FuzzNoCustom(obj)
+
+	// ClusterConfiguration.UseHyperKubeImage has been removed in v1alpha4, so setting it to false in order to avoid v1beta1 --> v1alpha4 --> v1beta1 round trip errors.
+	obj.UseHyperKubeImage = false
 }

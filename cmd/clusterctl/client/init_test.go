@@ -80,7 +80,6 @@ func Test_clusterctlClient_InitImages(t *testing.T) {
 				kubeconfigContext:      "mgmt-context",
 			},
 			expectedImages: []string{
-				"gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0",
 				"k8s.gcr.io/cluster-api-aws/cluster-api-aws-controller:v0.5.3",
 			},
 			wantErr: false,
@@ -215,13 +214,11 @@ func Test_clusterctlClient_Init(t *testing.T) {
 		controlPlaneProvider   []string
 		infrastructureProvider []string
 		targetNameSpace        string
-		watchingNamespace      string
 	}
 	type want struct {
-		provider          Provider
-		version           string
-		targetNamespace   string
-		watchingNamespace string
+		provider        Provider
+		version         string
+		targetNamespace string
 	}
 
 	tests := []struct {
@@ -256,32 +253,27 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   nil, // with an empty cluster, a control plane provider should be added automatically
 				infrastructureProvider: []string{"infra"},
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want: []want{
 				{
-					provider:          capiProviderConfig,
-					version:           "v1.0.0",
-					targetNamespace:   "ns1",
-					watchingNamespace: "",
+					provider:        capiProviderConfig,
+					version:         "v1.0.0",
+					targetNamespace: "ns1",
 				},
 				{
-					provider:          bootstrapProviderConfig,
-					version:           "v2.0.0",
-					targetNamespace:   "ns2",
-					watchingNamespace: "",
+					provider:        bootstrapProviderConfig,
+					version:         "v2.0.0",
+					targetNamespace: "ns2",
 				},
 				{
-					provider:          controlPlaneProviderConfig,
-					version:           "v2.0.0",
-					targetNamespace:   "ns3",
-					watchingNamespace: "",
+					provider:        controlPlaneProviderConfig,
+					version:         "v2.0.0",
+					targetNamespace: "ns3",
 				},
 				{
-					provider:          infraProviderConfig,
-					version:           "v3.0.0",
-					targetNamespace:   "ns4",
-					watchingNamespace: "",
+					provider:        infraProviderConfig,
+					version:         "v3.0.0",
+					targetNamespace: "ns4",
 				},
 			},
 			wantErr: false,
@@ -298,20 +290,17 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   []string{"-"}, // opt-out from the automatic control plane provider installation
 				infrastructureProvider: []string{"infra"},
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want: []want{
 				{
-					provider:          capiProviderConfig,
-					version:           "v1.0.0",
-					targetNamespace:   "ns1",
-					watchingNamespace: "",
+					provider:        capiProviderConfig,
+					version:         "v1.0.0",
+					targetNamespace: "ns1",
 				},
 				{
-					provider:          infraProviderConfig,
-					version:           "v3.0.0",
-					targetNamespace:   "ns4",
-					watchingNamespace: "",
+					provider:        infraProviderConfig,
+					version:         "v3.0.0",
+					targetNamespace: "ns4",
 				},
 			},
 			wantErr: false,
@@ -328,32 +317,27 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   []string{fmt.Sprintf("%s:v2.1.0", config.KubeadmControlPlaneProviderName)},
 				infrastructureProvider: []string{"infra:v3.1.0"},
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want: []want{
 				{
-					provider:          capiProviderConfig,
-					version:           "v1.1.0",
-					targetNamespace:   "ns1",
-					watchingNamespace: "",
+					provider:        capiProviderConfig,
+					version:         "v1.1.0",
+					targetNamespace: "ns1",
 				},
 				{
-					provider:          bootstrapProviderConfig,
-					version:           "v2.1.0",
-					targetNamespace:   "ns2",
-					watchingNamespace: "",
+					provider:        bootstrapProviderConfig,
+					version:         "v2.1.0",
+					targetNamespace: "ns2",
 				},
 				{
-					provider:          controlPlaneProviderConfig,
-					version:           "v2.1.0",
-					targetNamespace:   "ns3",
-					watchingNamespace: "",
+					provider:        controlPlaneProviderConfig,
+					version:         "v2.1.0",
+					targetNamespace: "ns3",
 				},
 				{
-					provider:          infraProviderConfig,
-					version:           "v3.1.0",
-					targetNamespace:   "ns4",
-					watchingNamespace: "",
+					provider:        infraProviderConfig,
+					version:         "v3.1.0",
+					targetNamespace: "ns4",
 				},
 			},
 			wantErr: false,
@@ -369,32 +353,27 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				bootstrapProvider:      []string{config.KubeadmBootstrapProviderName},
 				infrastructureProvider: []string{"infra"},
 				targetNameSpace:        "nsx",
-				watchingNamespace:      "",
 			},
 			want: []want{
 				{
-					provider:          capiProviderConfig,
-					version:           "v1.0.0",
-					targetNamespace:   "nsx",
-					watchingNamespace: "",
+					provider:        capiProviderConfig,
+					version:         "v1.0.0",
+					targetNamespace: "nsx",
 				},
 				{
-					provider:          bootstrapProviderConfig,
-					version:           "v2.0.0",
-					targetNamespace:   "nsx",
-					watchingNamespace: "",
+					provider:        bootstrapProviderConfig,
+					version:         "v2.0.0",
+					targetNamespace: "nsx",
 				},
 				{
-					provider:          controlPlaneProviderConfig,
-					version:           "v2.0.0",
-					targetNamespace:   "nsx",
-					watchingNamespace: "",
+					provider:        controlPlaneProviderConfig,
+					version:         "v2.0.0",
+					targetNamespace: "nsx",
 				},
 				{
-					provider:          infraProviderConfig,
-					version:           "v3.0.0",
-					targetNamespace:   "nsx",
-					watchingNamespace: "",
+					provider:        infraProviderConfig,
+					version:         "v3.0.0",
+					targetNamespace: "nsx",
 				},
 			},
 			wantErr: false,
@@ -410,20 +389,17 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				bootstrapProvider:      []string{config.KubeadmBootstrapProviderName},
 				infrastructureProvider: []string{"infra"},
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want: []want{
 				{
-					provider:          bootstrapProviderConfig,
-					version:           "v2.0.0",
-					targetNamespace:   "ns2",
-					watchingNamespace: "",
+					provider:        bootstrapProviderConfig,
+					version:         "v2.0.0",
+					targetNamespace: "ns2",
 				},
 				{
-					provider:          infraProviderConfig,
-					version:           "v3.0.0",
-					targetNamespace:   "ns4",
-					watchingNamespace: "",
+					provider:        infraProviderConfig,
+					version:         "v3.0.0",
+					targetNamespace: "ns4",
 				},
 			},
 			wantErr: false,
@@ -439,7 +415,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   nil,
 				infrastructureProvider: nil,
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want:    nil,
 			wantErr: true,
@@ -455,7 +430,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   nil,
 				infrastructureProvider: nil,
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want:    nil,
 			wantErr: true,
@@ -471,7 +445,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   nil,
 				infrastructureProvider: nil,
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want:    nil,
 			wantErr: true,
@@ -487,7 +460,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   []string{"infra"}, // wrong
 				infrastructureProvider: nil,
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want:    nil,
 			wantErr: true,
@@ -503,7 +475,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   nil,
 				infrastructureProvider: []string{config.KubeadmBootstrapProviderName}, // wrong
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			want:    nil,
 			wantErr: true,
@@ -520,7 +491,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				controlPlaneProvider:   []string{fmt.Sprintf("%s:v0.9.0", config.KubeadmControlPlaneProviderName)},
 				infrastructureProvider: []string{"infra:v0.9.0"},
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			wantErr: true,
 		},
@@ -535,7 +505,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				bootstrapProvider:      []string{fmt.Sprintf("%s:v0.9.0", config.KubeadmBootstrapProviderName)},
 				infrastructureProvider: []string{"infra:v0.9.0"},
 				targetNameSpace:        "",
-				watchingNamespace:      "",
 			},
 			wantErr: true,
 		},
@@ -556,7 +525,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				ControlPlaneProviders:   tt.args.controlPlaneProvider,
 				InfrastructureProviders: tt.args.infrastructureProvider,
 				TargetNamespace:         tt.args.targetNameSpace,
-				WatchingNamespace:       tt.args.watchingNamespace,
 			})
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
@@ -571,7 +539,6 @@ func Test_clusterctlClient_Init(t *testing.T) {
 				g.Expect(gItem.Type()).To(Equal(w.provider.Type()))
 				g.Expect(gItem.Version()).To(Equal(w.version))
 				g.Expect(gItem.TargetNamespace()).To(Equal(w.targetNamespace))
-				g.Expect(gItem.WatchingNamespace()).To(Equal(w.watchingNamespace))
 			}
 		})
 	}
@@ -781,7 +748,7 @@ func fakeInitializedCluster() *fakeClient {
 	p := client.clusters[input].Proxy()
 	fp := p.(*test.FakeProxy)
 
-	fp.WithProviderInventory(capiProviderConfig.Name(), capiProviderConfig.Type(), "v1.0.0", "capi-system", "")
+	fp.WithProviderInventory(capiProviderConfig.Name(), capiProviderConfig.Type(), "v1.0.0", "capi-system")
 
 	return client
 }
@@ -813,7 +780,7 @@ func templateYAML(ns string, clusterName string) []byte {
 // infraComponentsYAML defines a namespace and deployment with container
 // images and a variable.
 func infraComponentsYAML(namespace string) []byte {
-	var infraComponentsYAML string = `---
+	var infraComponentsYAML = `---
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -828,8 +795,6 @@ spec:
   template:
     spec:
       containers:
-      - image: gcr.io/kubebuilder/kube-rbac-proxy:v0.8.0
-        name: kube-rbac-proxy
       - image: k8s.gcr.io/cluster-api-aws/cluster-api-aws-controller:v0.5.3
         name: manager
         volumeMounts:

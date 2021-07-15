@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -34,6 +35,7 @@ import (
 )
 
 var (
+	// ErrNodeNotFound signals that a corev1.Node could not be found for the given provider id.
 	ErrNodeNotFound = errors.New("cannot find node with matching ProviderID")
 )
 
@@ -115,6 +117,10 @@ func (r *MachineReconciler) reconcileNode(ctx context.Context, cluster *clusterv
 		conditions.MarkFalse(machine, clusterv1.MachineNodeHealthyCondition, clusterv1.NodeConditionsFailedReason, clusterv1.ConditionSeverityWarning, message)
 		return ctrl.Result{}, nil
 	}
+	if status == corev1.ConditionUnknown {
+		conditions.MarkUnknown(machine, clusterv1.MachineNodeHealthyCondition, clusterv1.NodeConditionsFailedReason, message)
+		return ctrl.Result{}, nil
+	}
 
 	conditions.MarkTrue(machine, clusterv1.MachineNodeHealthyCondition)
 	return ctrl.Result{}, nil
@@ -126,7 +132,7 @@ func (r *MachineReconciler) reconcileNode(ctx context.Context, cluster *clusterv
 // if all conditions are unknown,  summarized status = Unknown.
 // (semantically true conditions: NodeMemoryPressure/NodeDiskPressure/NodePIDPressure == false or Ready == true.)
 func summarizeNodeConditions(node *corev1.Node) (corev1.ConditionStatus, string) {
-	totalNumOfConditionsChecked := 4
+	// totalNumOfConditionsChecked := 4
 	semanticallyFalseStatus := 0
 	unknownStatus := 0
 
@@ -156,7 +162,7 @@ func summarizeNodeConditions(node *corev1.Node) (corev1.ConditionStatus, string)
 	if semanticallyFalseStatus > 0 {
 		return corev1.ConditionFalse, message
 	}
-	if semanticallyFalseStatus+unknownStatus < totalNumOfConditionsChecked {
+	if semanticallyFalseStatus+unknownStatus < 4 {
 		return corev1.ConditionTrue, message
 	}
 	return corev1.ConditionUnknown, message

@@ -70,7 +70,7 @@ func TestReconcileKubeconfigEmptyAPIEndpoints(t *testing.T) {
 	}
 	clusterName := client.ObjectKey{Namespace: "test", Name: "foo"}
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -119,7 +119,7 @@ func TestReconcileKubeconfigMissingCACertificate(t *testing.T) {
 		},
 	}
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -179,7 +179,7 @@ func TestReconcileKubeconfigSecretAdoptsV1alpha2Secrets(t *testing.T) {
 		}, // the Cluster ownership defines v1alpha2 controlled secrets
 	)
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), existingKubeconfigSecret.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy(), existingKubeconfigSecret.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -243,7 +243,7 @@ func TestReconcileKubeconfigSecretDoesNotAdoptsUserSecrets(t *testing.T) {
 		metav1.OwnerReference{}, // user defined secrets are not owned by the cluster.
 	)
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), existingKubeconfigSecret.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy(), existingKubeconfigSecret.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -303,7 +303,7 @@ func TestKubeadmControlPlaneReconciler_reconcileKubeconfig(t *testing.T) {
 		*metav1.NewControllerRef(kcp, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane")),
 	)
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), existingCACertSecret.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy(), existingCACertSecret.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -357,17 +357,19 @@ func TestCloneConfigsAndGenerateMachine(t *testing.T) {
 			Namespace: cluster.Namespace,
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
-			InfrastructureTemplate: corev1.ObjectReference{
-				Kind:       genericMachineTemplate.GetKind(),
-				APIVersion: genericMachineTemplate.GetAPIVersion(),
-				Name:       genericMachineTemplate.GetName(),
-				Namespace:  cluster.Namespace,
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       genericMachineTemplate.GetKind(),
+					APIVersion: genericMachineTemplate.GetAPIVersion(),
+					Name:       genericMachineTemplate.GetName(),
+					Namespace:  cluster.Namespace,
+				},
 			},
 			Version: "v1.16.6",
 		},
 	}
 
-	fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
+	fakeClient := newFakeClient(cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
 
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
@@ -439,17 +441,19 @@ func TestCloneConfigsAndGenerateMachineFail(t *testing.T) {
 			Namespace: cluster.Namespace,
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
-			InfrastructureTemplate: corev1.ObjectReference{
-				Kind:       genericMachineTemplate.GetKind(),
-				APIVersion: genericMachineTemplate.GetAPIVersion(),
-				Name:       genericMachineTemplate.GetName(),
-				Namespace:  cluster.Namespace,
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       genericMachineTemplate.GetKind(),
+					APIVersion: genericMachineTemplate.GetAPIVersion(),
+					Name:       genericMachineTemplate.GetName(),
+					Namespace:  cluster.Namespace,
+				},
 			},
 			Version: "v1.16.6",
 		},
 	}
 
-	fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
+	fakeClient := newFakeClient(cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
 
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
@@ -461,7 +465,7 @@ func TestCloneConfigsAndGenerateMachineFail(t *testing.T) {
 	}
 
 	// Try to break Infra Cloning
-	kcp.Spec.InfrastructureTemplate.Name = "something_invalid"
+	kcp.Spec.MachineTemplate.InfrastructureRef.Name = "something_invalid"
 	g.Expect(r.cloneConfigsAndGenerateMachine(ctx, cluster, kcp, bootstrapSpec, nil)).To(HaveOccurred())
 	g.Expect(&kcp.GetConditions()[0]).Should(conditions.HaveSameStateOf(&clusterv1.Condition{
 		Type:     controlplanev1.MachinesCreatedCondition,
@@ -474,7 +478,7 @@ func TestCloneConfigsAndGenerateMachineFail(t *testing.T) {
 
 func TestKubeadmControlPlaneReconciler_generateMachine(t *testing.T) {
 	g := NewWithT(t)
-	fakeClient := newFakeClient(g)
+	fakeClient := newFakeClient()
 
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -533,7 +537,7 @@ func TestKubeadmControlPlaneReconciler_generateMachine(t *testing.T) {
 
 func TestKubeadmControlPlaneReconciler_generateKubeadmConfig(t *testing.T) {
 	g := NewWithT(t)
-	fakeClient := newFakeClient(g)
+	fakeClient := newFakeClient()
 
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{

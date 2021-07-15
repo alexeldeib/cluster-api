@@ -53,6 +53,7 @@ type ClusterResourceSetSpec struct {
 // ClusterResourceSetResourceKind is a string representation of a ClusterResourceSet resource kind.
 type ClusterResourceSetResourceKind string
 
+// Define the ClusterResourceSetResourceKind constants.
 const (
 	SecretClusterResourceSetResourceKind    ClusterResourceSetResourceKind = "Secret"
 	ConfigMapClusterResourceSetResourceKind ClusterResourceSetResourceKind = "ConfigMap"
@@ -98,10 +99,12 @@ type ClusterResourceSetStatus struct {
 
 // ANCHOR_END: ClusterResourceSetStatus
 
+// GetConditions returns the set of conditions for this object.
 func (m *ClusterResourceSet) GetConditions() clusterv1.Conditions {
 	return m.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (m *ClusterResourceSet) SetConditions(conditions clusterv1.Conditions) {
 	m.Status.Conditions = conditions
 }

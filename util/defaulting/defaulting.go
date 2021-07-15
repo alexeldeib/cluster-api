@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package defaulting implements defaulting webook functionality.
 package defaulting
 
 import (
@@ -25,7 +26,7 @@ import (
 
 // DefaultingValidator interface is for objects that define both defaulting
 // and validating webhooks.
-type DefaultingValidator interface {
+type DefaultingValidator interface { //nolint:revive
 	admission.Defaulter
 	admission.Validator
 }
@@ -48,6 +49,7 @@ func DefaultValidateTest(object DefaultingValidator) func(*testing.T) {
 		t.Run("validate-on-update", func(t *testing.T) {
 			g := gomega.NewWithT(t)
 			defaultingUpdateCopy.Default()
+			updateCopy.Default()
 			g.Expect(defaultingUpdateCopy.ValidateUpdate(updateCopy)).To(gomega.Succeed())
 		})
 		t.Run("validate-on-delete", func(t *testing.T) {

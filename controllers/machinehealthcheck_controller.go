@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controllers/external"
+	"sigs.k8s.io/cluster-api/controllers/noderefutil"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
@@ -62,7 +63,7 @@ const (
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch;delete
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinehealthchecks;machinehealthchecks/status,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinehealthchecks;machinehealthchecks/status;machinehealthchecks/finalizers,verbs=get;list;watch;update;patch
 
 // MachineHealthCheckReconciler reconciles a MachineHealthCheck object.
 type MachineHealthCheckReconciler struct {
@@ -209,8 +210,13 @@ func (r *MachineHealthCheckReconciler) reconcile(ctx context.Context, logger log
 	// do sort to avoid keep changing m.Status as the returned machines are not in order
 	sort.Strings(m.Status.Targets)
 
+	nodeStartupTimeout := m.Spec.NodeStartupTimeout // nolint:ifshort
+	if nodeStartupTimeout == nil {
+		nodeStartupTimeout = &clusterv1.DefaultNodeStartupTimeout
+	}
+
 	// health check all targets and reconcile mhc status
-	healthy, unhealthy, nextCheckTimes := r.healthCheckTargets(targets, logger, m.Spec.NodeStartupTimeout.Duration)
+	healthy, unhealthy, nextCheckTimes := r.healthCheckTargets(targets, logger, *nodeStartupTimeout)
 	m.Status.CurrentHealthy = int32(len(healthy))
 
 	var unhealthyLimitKey, unhealthyLimitValue interface{}
@@ -287,8 +293,8 @@ func (r *MachineHealthCheckReconciler) reconcile(ctx context.Context, logger log
 	m.Status.RemediationsAllowed = remediationCount
 	conditions.MarkTrue(m, clusterv1.RemediationAllowedCondition)
 
-	errList := r.PatchUnhealthyTargets(ctx, logger, unhealthy, cluster, m)
-	errList = append(errList, r.PatchHealthyTargets(ctx, logger, healthy, cluster, m)...)
+	errList := r.patchUnhealthyTargets(ctx, logger, unhealthy, cluster, m)
+	errList = append(errList, r.patchHealthyTargets(ctx, logger, healthy, m)...)
 
 	// handle update errors
 	if len(errList) > 0 {
@@ -306,8 +312,8 @@ func (r *MachineHealthCheckReconciler) reconcile(ctx context.Context, logger log
 	return ctrl.Result{}, nil
 }
 
-// PatchHealthyTargets patches healthy machines with MachineHealthCheckSuccededCondition.
-func (r *MachineHealthCheckReconciler) PatchHealthyTargets(ctx context.Context, logger logr.Logger, healthy []healthCheckTarget, cluster *clusterv1.Cluster, m *clusterv1.MachineHealthCheck) []error {
+// patchHealthyTargets patches healthy machines with MachineHealthCheckSucceededCondition.
+func (r *MachineHealthCheckReconciler) patchHealthyTargets(ctx context.Context, logger logr.Logger, healthy []healthCheckTarget, m *clusterv1.MachineHealthCheck) []error {
 	errList := []error{}
 	for _, t := range healthy {
 		if m.Spec.RemediationTemplate != nil {
@@ -337,8 +343,8 @@ func (r *MachineHealthCheckReconciler) PatchHealthyTargets(ctx context.Context, 
 	return errList
 }
 
-// PatchUnhealthyTargets patches machines with MachineOwnerRemediatedCondition for remediation.
-func (r *MachineHealthCheckReconciler) PatchUnhealthyTargets(ctx context.Context, logger logr.Logger, unhealthy []healthCheckTarget, cluster *clusterv1.Cluster, m *clusterv1.MachineHealthCheck) []error {
+// patchUnhealthyTargets patches machines with MachineOwnerRemediatedCondition for remediation.
+func (r *MachineHealthCheckReconciler) patchUnhealthyTargets(ctx context.Context, logger logr.Logger, unhealthy []healthCheckTarget, cluster *clusterv1.Cluster, m *clusterv1.MachineHealthCheck) []error {
 	// mark for remediation
 	errList := []error{}
 	for _, t := range unhealthy {
@@ -483,36 +489,12 @@ func (r *MachineHealthCheckReconciler) nodeToMachineHealthCheck(o client.Object)
 		panic(fmt.Sprintf("Expected a corev1.Node, got %T", o))
 	}
 
-	machine, err := r.getMachineFromNode(context.TODO(), node.Name)
+	machine, err := noderefutil.GetMachineFromNode(context.TODO(), r.Client, node.Name)
 	if machine == nil || err != nil {
 		return nil
 	}
 
 	return r.machineToMachineHealthCheck(machine)
-}
-
-func (r *MachineHealthCheckReconciler) getMachineFromNode(ctx context.Context, nodeName string) (*clusterv1.Machine, error) {
-	machineList := &clusterv1.MachineList{}
-	if err := r.Client.List(
-		ctx,
-		machineList,
-		client.MatchingFields{clusterv1.MachineNodeNameIndex: nodeName},
-	); err != nil {
-		return nil, errors.Wrap(err, "failed getting machine list")
-	}
-	// TODO(vincepri): Remove this loop once controller runtime fake client supports
-	// adding indexes on objects.
-	items := []*clusterv1.Machine{}
-	for i := range machineList.Items {
-		machine := &machineList.Items[i]
-		if machine.Status.NodeRef != nil && machine.Status.NodeRef.Name == nodeName {
-			items = append(items, machine)
-		}
-	}
-	if len(items) != 1 {
-		return nil, errors.Errorf("expecting one machine for node %v, got %v", nodeName, machineNames(items))
-	}
-	return items[0], nil
 }
 
 func (r *MachineHealthCheckReconciler) watchClusterNodes(ctx context.Context, cluster *clusterv1.Cluster) error {
@@ -521,16 +503,13 @@ func (r *MachineHealthCheckReconciler) watchClusterNodes(ctx context.Context, cl
 		return nil
 	}
 
-	if err := r.Tracker.Watch(ctx, remote.WatchInput{
+	return r.Tracker.Watch(ctx, remote.WatchInput{
 		Name:         "machinehealthcheck-watchClusterNodes",
 		Cluster:      util.ObjectKey(cluster),
 		Watcher:      r.controller,
 		Kind:         &corev1.Node{},
 		EventHandler: handler.EnqueueRequestsFromMapFunc(r.nodeToMachineHealthCheck),
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 // isAllowedRemediation checks the value of the MaxUnhealthy field to determine
@@ -590,7 +569,7 @@ func getMaxUnhealthy(mhc *clusterv1.MachineHealthCheck) (int, error) {
 	if mhc.Spec.MaxUnhealthy == nil {
 		return 0, errors.New("spec.maxUnhealthy must be set")
 	}
-	maxUnhealthy, err := intstr.GetValueFromIntOrPercent(mhc.Spec.MaxUnhealthy, int(mhc.Status.ExpectedMachines), false)
+	maxUnhealthy, err := intstr.GetScaledValueFromIntOrPercent(mhc.Spec.MaxUnhealthy, int(mhc.Status.ExpectedMachines), false)
 	if err != nil {
 		return 0, err
 	}
@@ -601,14 +580,6 @@ func getMaxUnhealthy(mhc *clusterv1.MachineHealthCheck) (int, error) {
 // ie the delta between the expected number of machines and the current number deemed healthy.
 func unhealthyMachineCount(mhc *clusterv1.MachineHealthCheck) int {
 	return int(mhc.Status.ExpectedMachines - mhc.Status.CurrentHealthy)
-}
-
-func machineNames(machines []*clusterv1.Machine) []string {
-	result := make([]string, 0, len(machines))
-	for _, m := range machines {
-		result = append(result, m.Name)
-	}
-	return result
 }
 
 // getExternalRemediationRequest gets reference to External Remediation Request, unstructured object.

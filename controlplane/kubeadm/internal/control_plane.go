@@ -18,6 +18,7 @@ package internal
 
 import (
 	"context"
+
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -106,9 +107,9 @@ func (c *ControlPlane) Version() *string {
 	return &c.KCP.Spec.Version
 }
 
-// InfrastructureTemplate returns the KubeadmControlPlane's infrastructure template.
-func (c *ControlPlane) InfrastructureTemplate() *corev1.ObjectReference {
-	return &c.KCP.Spec.InfrastructureTemplate
+// MachineInfrastructureTemplateRef returns the KubeadmControlPlane's infrastructure template for Machines.
+func (c *ControlPlane) MachineInfrastructureTemplateRef() *corev1.ObjectReference {
+	return &c.KCP.Spec.MachineTemplate.InfrastructureRef
 }
 
 // AsOwnerReference returns an owner reference to the KubeadmControlPlane.
@@ -204,7 +205,8 @@ func (c *ControlPlane) GenerateKubeadmConfig(spec *bootstrapv1.KubeadmConfigSpec
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
 			Namespace:       c.KCP.Namespace,
-			Labels:          ControlPlaneLabelsForCluster(c.Cluster.Name),
+			Labels:          ControlPlaneMachineLabelsForCluster(c.KCP, c.Cluster.Name),
+			Annotations:     c.KCP.Spec.MachineTemplate.ObjectMeta.Annotations,
 			OwnerReferences: []metav1.OwnerReference{owner},
 		},
 		Spec: *spec,
@@ -216,9 +218,10 @@ func (c *ControlPlane) GenerateKubeadmConfig(spec *bootstrapv1.KubeadmConfigSpec
 func (c *ControlPlane) NewMachine(infraRef, bootstrapRef *corev1.ObjectReference, failureDomain *string) *clusterv1.Machine {
 	return &clusterv1.Machine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
-			Namespace: c.KCP.Namespace,
-			Labels:    ControlPlaneLabelsForCluster(c.Cluster.Name),
+			Name:        names.SimpleNameGenerator.GenerateName(c.KCP.Name + "-"),
+			Namespace:   c.KCP.Namespace,
+			Labels:      ControlPlaneMachineLabelsForCluster(c.KCP, c.Cluster.Name),
+			Annotations: c.KCP.Spec.MachineTemplate.ObjectMeta.Annotations,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(c.KCP, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane")),
 			},
@@ -257,10 +260,10 @@ func (c *ControlPlane) MachinesNeedingRollout() collections.Machines {
 
 	// Return machines if they are scheduled for rollout or if with an outdated configuration.
 	return machines.AnyFilter(
-		// Machines that are scheduled for rollout (KCP.Spec.UpgradeAfter set, the UpgradeAfter deadline is expired, and the machine was created before the deadline).
-		collections.ShouldRolloutAfter(&c.reconciliationTime, c.KCP.Spec.UpgradeAfter),
+		// Machines that are scheduled for rollout (KCP.Spec.RolloutAfter set, the RolloutAfter deadline is expired, and the machine was created before the deadline).
+		collections.ShouldRolloutAfter(&c.reconciliationTime, c.KCP.Spec.RolloutAfter),
 		// Machines that do not match with KCP config.
-		collections.Not(MatchesKCPConfiguration(c.infraResources, c.kubeadmConfigs, c.KCP)),
+		collections.Not(MatchesMachineSpec(c.infraResources, c.kubeadmConfigs, c.KCP)),
 	)
 }
 
@@ -326,6 +329,7 @@ func (c *ControlPlane) HasUnhealthyMachine() bool {
 	return len(c.UnhealthyMachines()) > 0
 }
 
+// PatchMachines patches all the machines conditions.
 func (c *ControlPlane) PatchMachines(ctx context.Context) error {
 	errList := []error{}
 	for i := range c.Machines {

@@ -23,9 +23,19 @@ import (
 	"runtime"
 	"strings"
 
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
+	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/scheme"
+
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/util/version"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
+)
+
+const (
+	latestVersionTag = "latest"
 )
 
 // localRepository provides support for providers located on the local filesystem.
@@ -83,7 +93,7 @@ func (r *localRepository) ComponentsPath() string {
 func (r *localRepository) GetFile(version, fileName string) ([]byte, error) {
 	var err error
 
-	if version == "latest" {
+	if version == latestVersionTag {
 		version, err = r.getLatestRelease()
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get the latest release")
@@ -162,7 +172,7 @@ func newLocalRepository(providerConfig config.Provider, configVariablesClient co
 
 	componentsPath := urlSplit[len(urlSplit)-1]
 	defaultVersion := urlSplit[len(urlSplit)-2]
-	if defaultVersion != "latest" {
+	if defaultVersion != latestVersionTag {
 		_, err = version.ParseSemantic(defaultVersion)
 		if err != nil {
 			return nil, errors.Errorf("invalid version: %q. Version must obey the syntax and semantics of the \"Semantic Versioning\" specification (http://semver.org/) and path format {basepath}/{provider-name}/{version}/{components.yaml}", defaultVersion)
@@ -187,8 +197,8 @@ func newLocalRepository(providerConfig config.Provider, configVariablesClient co
 		componentsPath:        componentsPath,
 	}
 
-	if defaultVersion == "latest" {
-		repo.defaultVersion, err = repo.getLatestRelease()
+	if defaultVersion == latestVersionTag {
+		repo.defaultVersion, err = repo.getLatestContractRelease(clusterv1.GroupVersion.Version)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get latest version")
 		}
@@ -196,8 +206,51 @@ func newLocalRepository(providerConfig config.Provider, configVariablesClient co
 	return repo, nil
 }
 
+// getLatestContractRelease returns the latest patch release for a local repository for the current API contract.
+func (r *localRepository) getLatestContractRelease(contract string) (string, error) {
+	latest, err := r.getLatestRelease()
+	if err != nil {
+		return latest, err
+	}
+	// Attempt to check if the latest release satisfies the API Contract
+	// This is a best-effort attempt to find the latest release for an older API contract if it's not the latest Github release.
+	// If an error occurs, we just return the latest release.
+	file, err := r.GetFile(latest, metadataFile)
+	if err != nil {
+		// if we can't get the metadata file from the release, we return latest.
+		return latest, nil // nolint:nilerr
+	}
+	latestMetadata := &clusterctlv1.Metadata{}
+	codecFactory := serializer.NewCodecFactory(scheme.Scheme)
+	if err := apiruntime.DecodeInto(codecFactory.UniversalDecoder(), file, latestMetadata); err != nil {
+		return latest, nil // nolint:nilerr
+	}
+
+	releaseSeries := latestMetadata.GetReleaseSeriesForContract(contract)
+	if releaseSeries == nil {
+		return latest, nil
+	}
+
+	sv, err := version.ParseSemantic(latest)
+	if err != nil {
+		return latest, nil // nolint:nilerr
+	}
+
+	// If the Major or Minor version of the latest release doesn't match the release series for the current contract,
+	// return the latest patch release of the desired Major/Minor version.
+	if sv.Major() != releaseSeries.Major || sv.Minor() != releaseSeries.Minor {
+		return r.getLatestPatchRelease(&releaseSeries.Major, &releaseSeries.Minor)
+	}
+	return latest, nil
+}
+
 // getLatestRelease returns the latest release for the local repository.
 func (r *localRepository) getLatestRelease() (string, error) {
+	return r.getLatestPatchRelease(nil, nil)
+}
+
+// getLatestPatchRelease returns the latest patch release for a given Major and Minor version.
+func (r *localRepository) getLatestPatchRelease(major, minor *uint) (string, error) {
 	versions, err := r.GetVersions()
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to get local repository versions")
@@ -212,6 +265,11 @@ func (r *localRepository) getLatestRelease() (string, error) {
 	for _, v := range versions {
 		sv, err := version.ParseSemantic(v)
 		if err != nil {
+			continue
+		}
+
+		if (major != nil && sv.Major() != *major) || (minor != nil && sv.Minor() != *minor) {
+			// skip versions that don't match the desired Major.Minor version.
 			continue
 		}
 

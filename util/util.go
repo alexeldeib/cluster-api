@@ -29,7 +29,6 @@ import (
 	"github.com/gobuffalo/flect"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,8 +52,14 @@ const (
 )
 
 var (
-	rnd                          = rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
-	ErrNoCluster                 = fmt.Errorf("no %q label present", clusterv1.ClusterLabelName)
+	rnd = rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec
+
+	// ErrNoCluster is returned when the cluster
+	// label could not be found on the object passed in.
+	ErrNoCluster = fmt.Errorf("no %q label present", clusterv1.ClusterLabelName)
+
+	// ErrUnstructuredFieldNotFound determines that a field
+	// in an unstructured object could not be found.
 	ErrUnstructuredFieldNotFound = fmt.Errorf("field not found")
 )
 
@@ -127,10 +132,10 @@ func IsControlPlaneMachine(machine *clusterv1.Machine) bool {
 }
 
 // IsNodeReady returns true if a node is ready.
-func IsNodeReady(node *v1.Node) bool {
+func IsNodeReady(node *corev1.Node) bool {
 	for _, condition := range node.Status.Conditions {
-		if condition.Type == v1.NodeReady {
-			return condition.Status == v1.ConditionTrue
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
 		}
 	}
 
@@ -392,9 +397,9 @@ func HasOwner(refList []metav1.OwnerReference, apiVersion string, kinds []string
 		return false
 	}
 
-	kMap := make(map[string]bool)
+	kindMap := make(map[string]bool)
 	for _, kind := range kinds {
-		kMap[kind] = true
+		kindMap[kind] = true
 	}
 
 	for _, mr := range refList {
@@ -403,7 +408,7 @@ func HasOwner(refList []metav1.OwnerReference, apiVersion string, kinds []string
 			return false
 		}
 
-		if mrGroupVersion.Group == gv.Group && kMap[mr.Kind] {
+		if mrGroupVersion.Group == gv.Group && kindMap[mr.Kind] {
 			return true
 		}
 	}

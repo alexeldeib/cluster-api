@@ -23,6 +23,10 @@ import (
 	"testing"
 	"time"
 
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/feature"
+
+	"github.com/blang/semver"
 	. "github.com/onsi/gomega"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -31,7 +35,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2/klogr"
 	"k8s.io/utils/pointer"
@@ -40,7 +43,6 @@ import (
 	"sigs.k8s.io/cluster-api/controllers/external"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
-	"sigs.k8s.io/cluster-api/test/helpers"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/collections"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -48,13 +50,14 @@ import (
 	"sigs.k8s.io/cluster-api/util/secret"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func TestClusterToKubeadmControlPlane(t *testing.T) {
 	g := NewWithT(t)
-	fakeClient := newFakeClient(g)
+	fakeClient := newFakeClient()
 
 	cluster := newCluster(&types.NamespacedName{Name: "foo", Namespace: "test"})
 	cluster.Spec = clusterv1.ClusterSpec{
@@ -85,7 +88,7 @@ func TestClusterToKubeadmControlPlane(t *testing.T) {
 
 func TestClusterToKubeadmControlPlaneNoControlPlane(t *testing.T) {
 	g := NewWithT(t)
-	fakeClient := newFakeClient(g)
+	fakeClient := newFakeClient()
 
 	cluster := newCluster(&types.NamespacedName{Name: "foo", Namespace: "test"})
 
@@ -100,7 +103,7 @@ func TestClusterToKubeadmControlPlaneNoControlPlane(t *testing.T) {
 
 func TestClusterToKubeadmControlPlaneOtherControlPlane(t *testing.T) {
 	g := NewWithT(t)
-	fakeClient := newFakeClient(g)
+	fakeClient := newFakeClient()
 
 	cluster := newCluster(&types.NamespacedName{Name: "foo", Namespace: "test"})
 	cluster.Spec = clusterv1.ClusterSpec{
@@ -124,11 +127,11 @@ func TestClusterToKubeadmControlPlaneOtherControlPlane(t *testing.T) {
 func TestReconcileReturnErrorWhenOwnerClusterIsMissing(t *testing.T) {
 	g := NewWithT(t)
 	cluster, kcp, _ := createClusterWithControlPlane()
-	g.Expect(testEnv.Create(ctx, cluster)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, kcp)).To(Succeed())
+	g.Expect(env.Create(ctx, cluster)).To(Succeed())
+	g.Expect(env.Create(ctx, kcp)).To(Succeed())
 
 	r := &KubeadmControlPlaneReconciler{
-		Client:   testEnv,
+		Client:   env,
 		recorder: record.NewFakeRecorder(32),
 	}
 
@@ -136,8 +139,8 @@ func TestReconcileReturnErrorWhenOwnerClusterIsMissing(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result).To(Equal(ctrl.Result{}))
 
-	//calling reconcile should return error
-	g.Expect(testEnv.Delete(ctx, cluster)).To(Succeed())
+	// calling reconcile should return error
+	g.Expect(env.Delete(ctx, cluster)).To(Succeed())
 
 	g.Eventually(func() error {
 		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(kcp)})
@@ -150,23 +153,23 @@ func TestReconcileUpdateObservedGeneration(t *testing.T) {
 
 	g := NewWithT(t)
 	r := &KubeadmControlPlaneReconciler{
-		Client:            testEnv,
+		Client:            env,
 		recorder:          record.NewFakeRecorder(32),
-		managementCluster: &internal.Management{Client: testEnv.Client, Tracker: nil},
+		managementCluster: &internal.Management{Client: env.Client, Tracker: nil},
 	}
 
 	cluster, kcp, _ := createClusterWithControlPlane()
-	g.Expect(testEnv.Create(ctx, cluster)).To(Succeed())
-	g.Expect(testEnv.Create(ctx, kcp)).To(Succeed())
+	g.Expect(env.Create(ctx, cluster)).To(Succeed())
+	g.Expect(env.Create(ctx, kcp)).To(Succeed())
 
 	// read kcp.Generation after create
-	errGettingObject := testEnv.Get(ctx, util.ObjectKey(kcp), kcp)
+	errGettingObject := env.Get(ctx, util.ObjectKey(kcp), kcp)
 	g.Expect(errGettingObject).NotTo(HaveOccurred())
 	generation := kcp.Generation
 
 	// Set cluster.status.InfrastructureReady so we actually enter in the reconcile loop
 	patch := client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf("{\"status\":{\"infrastructureReady\":%t}}", true)))
-	g.Expect(testEnv.Status().Patch(ctx, cluster, patch)).To(Succeed())
+	g.Expect(env.Status().Patch(ctx, cluster, patch)).To(Succeed())
 
 	// call reconcile the first time, so we can check if observedGeneration is set when adding a finalizer
 	result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(kcp)})
@@ -174,17 +177,17 @@ func TestReconcileUpdateObservedGeneration(t *testing.T) {
 	g.Expect(result).To(Equal(ctrl.Result{}))
 
 	g.Eventually(func() int64 {
-		errGettingObject = testEnv.Get(ctx, util.ObjectKey(kcp), kcp)
+		errGettingObject = env.Get(ctx, util.ObjectKey(kcp), kcp)
 		g.Expect(errGettingObject).NotTo(HaveOccurred())
 		return kcp.Status.ObservedGeneration
 	}, 10*time.Second).Should(Equal(generation))
 
 	// triggers a generation change by changing the spec
 	kcp.Spec.Replicas = pointer.Int32Ptr(*kcp.Spec.Replicas + 2)
-	g.Expect(testEnv.Update(ctx, kcp)).To(Succeed())
+	g.Expect(env.Update(ctx, kcp)).To(Succeed())
 
 	// read kcp.Generation after the update
-	errGettingObject = testEnv.Get(ctx, util.ObjectKey(kcp), kcp)
+	errGettingObject = env.Get(ctx, util.ObjectKey(kcp), kcp)
 	g.Expect(errGettingObject).NotTo(HaveOccurred())
 	generation = kcp.Generation
 
@@ -194,7 +197,7 @@ func TestReconcileUpdateObservedGeneration(t *testing.T) {
 	_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: util.ObjectKey(kcp)})
 
 	g.Eventually(func() int64 {
-		errGettingObject = testEnv.Get(ctx, util.ObjectKey(kcp), kcp)
+		errGettingObject = env.Get(ctx, util.ObjectKey(kcp), kcp)
 		g.Expect(errGettingObject).NotTo(HaveOccurred())
 		return kcp.Status.ObservedGeneration
 	}, 10*time.Second).Should(Equal(generation))
@@ -210,12 +213,20 @@ func TestReconcileNoClusterOwnerRef(t *testing.T) {
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       "UnknownInfraMachine",
+					APIVersion: "test/v1alpha1",
+					Name:       "foo",
+					Namespace:  "test",
+				},
+			},
 		},
 	}
 	kcp.Default()
 	g.Expect(kcp.ValidateCreate()).To(Succeed())
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -240,10 +251,18 @@ func TestReconcileNoKCP(t *testing.T) {
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       "UnknownInfraMachine",
+					APIVersion: "test/v1alpha1",
+					Name:       "foo",
+					Namespace:  "test",
+				},
+			},
 		},
 	}
 
-	fakeClient := newFakeClient(g)
+	fakeClient := newFakeClient()
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -270,12 +289,20 @@ func TestReconcileNoCluster(t *testing.T) {
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       "UnknownInfraMachine",
+					APIVersion: "test/v1alpha1",
+					Name:       "foo",
+					Namespace:  "test",
+				},
+			},
 		},
 	}
 	kcp.Default()
 	g.Expect(kcp.ValidateCreate()).To(Succeed())
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -311,11 +338,19 @@ func TestReconcilePaused(t *testing.T) {
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       "UnknownInfraMachine",
+					APIVersion: "test/v1alpha1",
+					Name:       "foo",
+					Namespace:  "test",
+				},
+			},
 		},
 	}
 	kcp.Default()
 	g.Expect(kcp.ValidateCreate()).To(Succeed())
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), cluster.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy(), cluster.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -356,12 +391,20 @@ func TestReconcileClusterNoEndpoints(t *testing.T) {
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Version: "v1.16.6",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       "UnknownInfraMachine",
+					APIVersion: "test/v1alpha1",
+					Name:       "foo",
+					Namespace:  "test",
+				},
+			},
 		},
 	}
 	kcp.Default()
 	g.Expect(kcp.ValidateCreate()).To(Succeed())
 
-	fakeClient := newFakeClient(g, kcp.DeepCopy(), cluster.DeepCopy())
+	fakeClient := newFakeClient(kcp.DeepCopy(), cluster.DeepCopy())
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
 		recorder: record.NewFakeRecorder(32),
@@ -418,7 +461,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: cluster.Namespace,
 					Name:      name,
-					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+					Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 				},
 				Spec: clusterv1.MachineSpec{
 					Bootstrap: clusterv1.Bootstrap{
@@ -441,7 +484,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 			fmc.Machines.Insert(m)
 		}
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		fmc.Reader = fakeClient
 		r := &KubeadmControlPlaneReconciler{
 			Client:                    fakeClient,
@@ -481,7 +524,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: cluster.Namespace,
 					Name:      name,
-					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+					Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 				},
 				Spec: clusterv1.MachineSpec{
 					Bootstrap: clusterv1.Bootstrap{
@@ -532,7 +575,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 			fmc.Machines.Insert(m)
 		}
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		fmc.Reader = fakeClient
 		r := &KubeadmControlPlaneReconciler{
 			Client:                    fakeClient,
@@ -589,7 +632,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: cluster.Namespace,
 					Name:      name,
-					Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+					Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 				},
 				Spec: clusterv1.MachineSpec{
 					Bootstrap: clusterv1.Bootstrap{
@@ -611,7 +654,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 			objs = append(objs, m, cfg)
 			fmc.Machines.Insert(m)
 		}
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		fmc.Reader = fakeClient
 		r := &KubeadmControlPlaneReconciler{
 			Client:                    fakeClient,
@@ -646,7 +689,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: cluster.Namespace,
 						Name:      "test0",
-						Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+						Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 					},
 					Spec: clusterv1.MachineSpec{
 						Bootstrap: clusterv1.Bootstrap{
@@ -662,7 +705,7 @@ func TestKubeadmControlPlaneReconciler_adoption(t *testing.T) {
 			Workload: fakeWorkloadCluster{},
 		}
 
-		fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy(), fmc.Machines["test0"].DeepCopy())
+		fakeClient := newFakeClient(cluster.DeepCopy(), kcp.DeepCopy(), tmpl.DeepCopy(), fmc.Machines["test0"].DeepCopy())
 		fmc.Reader = fakeClient
 		recorder := record.NewFakeRecorder(32)
 		r := &KubeadmControlPlaneReconciler{
@@ -730,11 +773,13 @@ func TestReconcileInitializeControlPlane(t *testing.T) {
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
 			Replicas: nil,
 			Version:  "v1.16.6",
-			InfrastructureTemplate: corev1.ObjectReference{
-				Kind:       genericMachineTemplate.GetKind(),
-				APIVersion: genericMachineTemplate.GetAPIVersion(),
-				Name:       genericMachineTemplate.GetName(),
-				Namespace:  cluster.Namespace,
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       genericMachineTemplate.GetKind(),
+					APIVersion: genericMachineTemplate.GetAPIVersion(),
+					Name:       genericMachineTemplate.GetName(),
+					Namespace:  cluster.Namespace,
+				},
 			},
 			KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{},
 		},
@@ -787,7 +832,6 @@ kubernetesVersion: metav1.16.1`,
 	}
 
 	fakeClient := newFakeClient(
-		g,
 		kcp.DeepCopy(),
 		cluster.DeepCopy(),
 		genericMachineTemplate.DeepCopy(),
@@ -883,7 +927,6 @@ func TestKubeadmControlPlaneReconciler_updateCoreDNS(t *testing.T) {
 			KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 				ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 					DNS: bootstrapv1.DNS{
-						Type: bootstrapv1.CoreDNS,
 						ImageMeta: bootstrapv1.ImageMeta{
 							ImageRepository: "k8s.gcr.io",
 							ImageTag:        "1.7.2",
@@ -963,7 +1006,7 @@ kubernetesVersion: metav1.16.1`,
 			corednsCM.DeepCopy(),
 			kubeadmCM.DeepCopy(),
 		}
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		log.SetLogger(klogr.New())
 
 		workloadCluster := fakeWorkloadCluster{
@@ -975,7 +1018,7 @@ kubernetesVersion: metav1.16.1`,
 			},
 		}
 
-		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp)).To(Succeed())
+		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp, semver.MustParse("1.19.1"))).To(Succeed())
 
 		var actualCoreDNSCM corev1.ConfigMap
 		g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: "coredns", Namespace: metav1.NamespaceSystem}, &actualCoreDNSCM)).To(Succeed())
@@ -1021,7 +1064,7 @@ kubernetesVersion: metav1.16.1`,
 			kubeadmCM.DeepCopy(),
 		}
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		log.SetLogger(klogr.New())
 
 		workloadCluster := fakeWorkloadCluster{
@@ -1033,7 +1076,7 @@ kubernetesVersion: metav1.16.1`,
 			},
 		}
 
-		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp)).To(Succeed())
+		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp, semver.MustParse("1.19.1"))).To(Succeed())
 	})
 
 	t.Run("should not return an error when there is no CoreDNS configmap", func(t *testing.T) {
@@ -1045,7 +1088,7 @@ kubernetesVersion: metav1.16.1`,
 			kubeadmCM.DeepCopy(),
 		}
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		workloadCluster := fakeWorkloadCluster{
 			Workload: &internal.Workload{
 				Client: fakeClient,
@@ -1055,7 +1098,7 @@ kubernetesVersion: metav1.16.1`,
 			},
 		}
 
-		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp)).To(Succeed())
+		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp, semver.MustParse("1.19.1"))).To(Succeed())
 	})
 
 	t.Run("should not return an error when there is no CoreDNS deployment", func(t *testing.T) {
@@ -1067,7 +1110,7 @@ kubernetesVersion: metav1.16.1`,
 			kubeadmCM.DeepCopy(),
 		}
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		log.SetLogger(klogr.New())
 
 		workloadCluster := fakeWorkloadCluster{
@@ -1079,7 +1122,7 @@ kubernetesVersion: metav1.16.1`,
 			},
 		}
 
-		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp)).To(Succeed())
+		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp, semver.MustParse("1.19.1"))).To(Succeed())
 	})
 
 	t.Run("should not return an error when no DNS upgrade is requested", func(t *testing.T) {
@@ -1097,14 +1140,14 @@ kubernetesVersion: metav1.16.1`,
 		depl.Spec.Template.Spec.Containers[0].Image = "my-cool-image!!!!" // something very unlikely for getCoreDNSInfo to parse
 		objs = append(objs, depl)
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		workloadCluster := fakeWorkloadCluster{
 			Workload: &internal.Workload{
 				Client: fakeClient,
 			},
 		}
 
-		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp)).To(Succeed())
+		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp, semver.MustParse("1.19.1"))).To(Succeed())
 
 		var actualCoreDNSCM corev1.ConfigMap
 		g.Expect(fakeClient.Get(ctx, client.ObjectKey{Name: "coredns", Namespace: metav1.NamespaceSystem}, &actualCoreDNSCM)).To(Succeed())
@@ -1128,7 +1171,7 @@ kubernetesVersion: metav1.16.1`,
 			corednsCM.DeepCopy(),
 		}
 
-		fakeClient := newFakeClient(g, objs...)
+		fakeClient := newFakeClient(objs...)
 		log.SetLogger(klogr.New())
 
 		workloadCluster := fakeWorkloadCluster{
@@ -1140,7 +1183,7 @@ kubernetesVersion: metav1.16.1`,
 			},
 		}
 
-		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp)).ToNot(Succeed())
+		g.Expect(workloadCluster.UpdateCoreDNS(ctx, kcp, semver.MustParse("1.19.1"))).ToNot(Succeed())
 	})
 }
 
@@ -1157,7 +1200,7 @@ func TestKubeadmControlPlaneReconciler_reconcileDelete(t *testing.T) {
 			initObjs = append(initObjs, m)
 		}
 
-		fakeClient := newFakeClient(g, initObjs...)
+		fakeClient := newFakeClient(initObjs...)
 
 		r := &KubeadmControlPlaneReconciler{
 			Client: fakeClient,
@@ -1207,7 +1250,56 @@ func TestKubeadmControlPlaneReconciler_reconcileDelete(t *testing.T) {
 			initObjs = append(initObjs, m)
 		}
 
-		fakeClient := newFakeClient(g, initObjs...)
+		fakeClient := newFakeClient(initObjs...)
+
+		r := &KubeadmControlPlaneReconciler{
+			Client: fakeClient,
+			managementCluster: &fakeManagementCluster{
+				Management: &internal.Management{Client: fakeClient},
+				Workload:   fakeWorkloadCluster{},
+			},
+			recorder: record.NewFakeRecorder(32),
+		}
+
+		result, err := r.reconcileDelete(ctx, cluster, kcp)
+		g.Expect(result).To(Equal(ctrl.Result{RequeueAfter: deleteRequeueAfter}))
+		g.Expect(err).To(BeNil())
+
+		g.Expect(kcp.Finalizers).To(ContainElement(controlplanev1.KubeadmControlPlaneFinalizer))
+
+		controlPlaneMachines := clusterv1.MachineList{}
+		labels := map[string]string{
+			clusterv1.MachineControlPlaneLabelName: "",
+		}
+		g.Expect(fakeClient.List(ctx, &controlPlaneMachines, client.MatchingLabels(labels))).To(Succeed())
+		g.Expect(controlPlaneMachines.Items).To(HaveLen(3))
+	})
+
+	t.Run("does not remove any control plane Machines if MachinePools exist", func(t *testing.T) {
+		_ = feature.MutableGates.Set("MachinePool=true")
+		g := NewWithT(t)
+
+		cluster, kcp, _ := createClusterWithControlPlane()
+		controllerutil.AddFinalizer(kcp, controlplanev1.KubeadmControlPlaneFinalizer)
+
+		workerMachinePool := &expv1.MachinePool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "worker",
+				Namespace: cluster.Namespace,
+				Labels: map[string]string{
+					clusterv1.ClusterLabelName: cluster.Name,
+				},
+			},
+		}
+
+		initObjs := []client.Object{cluster.DeepCopy(), kcp.DeepCopy(), workerMachinePool.DeepCopy()}
+
+		for i := 0; i < 3; i++ {
+			m, _ := createMachineNodePair(fmt.Sprintf("test-%d", i), cluster, kcp, true)
+			initObjs = append(initObjs, m)
+		}
+
+		fakeClient := newFakeClient(initObjs...)
 
 		r := &KubeadmControlPlaneReconciler{
 			Client: fakeClient,
@@ -1238,7 +1330,7 @@ func TestKubeadmControlPlaneReconciler_reconcileDelete(t *testing.T) {
 		cluster, kcp, _ := createClusterWithControlPlane()
 		controllerutil.AddFinalizer(kcp, controlplanev1.KubeadmControlPlaneFinalizer)
 
-		fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy())
+		fakeClient := newFakeClient(cluster.DeepCopy(), kcp.DeepCopy())
 
 		r := &KubeadmControlPlaneReconciler{
 			Client: fakeClient,
@@ -1258,13 +1350,10 @@ func TestKubeadmControlPlaneReconciler_reconcileDelete(t *testing.T) {
 
 // test utils
 
-func newFakeClient(g *WithT, initObjs ...client.Object) client.Client {
-	g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
-	g.Expect(bootstrapv1.AddToScheme(scheme.Scheme)).To(Succeed())
-	g.Expect(controlplanev1.AddToScheme(scheme.Scheme)).To(Succeed())
+func newFakeClient(initObjs ...client.Object) client.Client {
 	return &fakeClient{
 		startTime: time.Now(),
-		Client:    helpers.NewFakeClientWithScheme(scheme.Scheme, initObjs...),
+		Client:    fake.NewClientBuilder().WithObjects(initObjs...).Build(),
 	}
 }
 
@@ -1322,11 +1411,13 @@ func createClusterWithControlPlane() (*clusterv1.Cluster, *controlplanev1.Kubead
 			},
 		},
 		Spec: controlplanev1.KubeadmControlPlaneSpec{
-			InfrastructureTemplate: corev1.ObjectReference{
-				Kind:       "GenericMachineTemplate",
-				Namespace:  namespace,
-				Name:       "infra-foo",
-				APIVersion: "generic.io/v1",
+			MachineTemplate: controlplanev1.KubeadmControlPlaneMachineTemplate{
+				InfrastructureRef: corev1.ObjectReference{
+					Kind:       "GenericMachineTemplate",
+					Namespace:  namespace,
+					Name:       "infra-foo",
+					APIVersion: "generic.io/v1",
+				},
 			},
 			Replicas: pointer.Int32Ptr(int32(3)),
 			Version:  "v1.16.6",
@@ -1380,7 +1471,7 @@ func createMachineNodePair(name string, cluster *clusterv1.Cluster, kcp *control
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
 			Name:      name,
-			Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+			Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(kcp, controlplanev1.GroupVersion.WithKind("KubeadmControlPlane")),
 			},

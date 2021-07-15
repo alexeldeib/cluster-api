@@ -1,8 +1,8 @@
 ---
 title: Kubeadm Based Control Plane Management
 authors:
-  - "@detiber”
-  - "@chuckha”
+  - "@detiber"
+  - "@chuckha"
   - "@randomvariable"
   - "@dlipovetsky"
   - "@amy"
@@ -48,8 +48,8 @@ status: implementable
                * [Scale Down](#scale-down)
                * [Delete of the entire KubeadmControlPlane (kubectl delete controlplane my-controlplane)](#delete-of-the-entire-kubeadmcontrolplane-kubectl-delete-controlplane-my-controlplane)
                * [KubeadmControlPlane rollout](#kubeadmcontrolplane-rollout)
-               * [Rolling update strategy](#rolling update strategy)
-               * [Constraints and Assumptions](#constraints-and-assumptions)                
+               * [Rolling update strategy](#rolling-update-strategy)
+               * [Constraints and Assumptions](#constraints-and-assumptions)
                * [Remediation (using delete-and-recreate)](#remediation-using-delete-and-recreate)
                   * [Why delete and recreate](#why-delete-and-recreate)
                   * [Scenario 1: Three replicas, one machine marked for remediation](#scenario-1-three-replicas-one-machine-marked-for-remediation)
@@ -131,10 +131,10 @@ Non-Goals listed in this document are intended to scope bound the current v1alph
 - To mutate the configuration of live, running clusters (e.g. changing api-server flags), as this is the responsibility of the [component configuration working group](https://git.k8s.io/community/wg-component-standard).
 - To provide configuration of external cloud providers (i.e. the [cloud-controller-manager](https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/)).This is deferred to kubeadm.
 - To provide CNI configuration. This is deferred to external, higher level tooling.
-- To provide the upgrade logic to handle changes to infrastructure (networks, firewalls etc…) that may need to be done to support a control plane on a newer version of Kubernetes (e.g. a cloud controller manager requires updated permissions against infrastructure APIs). We expect the work on [add-on components](https://git.k8s.io/community/sig-cluster-lifecycle#cluster-addons)) to help to resolve some of these issues.
+- To provide the upgrade logic to handle changes to infrastructure (networks, firewalls etc…) that may need to be done to support a control plane on a newer version of Kubernetes (e.g. a cloud controller manager requires updated permissions against infrastructure APIs). We expect the work on [add-on components](https://git.k8s.io/community/sig-cluster-lifecycle#cluster-addons) to help to resolve some of these issues.
 - To provide automation around the horizontal or vertical scaling of control plane components, especially as etcd places hard performance limits beyond 3 nodes (due to latency).
 - To support upgrades where the infrastructure does not rely on a Load Balancer for access to the API Server.
-- To implement a fully modeled state machine and/or Conditions, a larger effort for Cluster API more broadly is being organized on [this issue](https://github.com/kubernetes-sigs/cluster-api/issues/1658))
+- To implement a fully modeled state machine and/or Conditions, a larger effort for Cluster API more broadly is being organized on [this issue](https://github.com/kubernetes-sigs/cluster-api/issues/1658)
 
 ## Proposal
 
@@ -216,7 +216,7 @@ And the following defaulting:
       // Default is RollingUpdate.
       // +optional
       Type RolloutStrategyType `json:"type,omitempty"`
-    
+
       // Rolling update config params. Present only if
       // RolloutStrategyType = RollingUpdate.
       // +optional
@@ -421,24 +421,24 @@ KubeadmControlPlane rollout is triggered by:
   - Changes to Version
   - Changes to the kubeadmConfigSpec
   - Changes to the infrastructureRef
-  - The `upgradeAfter` field, which can be set to a specific time in the future
+  - The `rolloutAfter` field, which can be set to a specific time in the future
     - Set to `nil` or the zero value of `time.Time` if no upgrades are desired
     - An upgrade will run after that timestamp is passed
     - Good for scheduling upgrades/SLOs
-    - Set `upgradeAfter` to now (in RFC3339 form) if an upgrade is required immediately
+    - Set `rolloutAfter` to now (in RFC3339 form) if an upgrade is required immediately
 
 - The controller should tolerate the manual or automatic removal of a replica during the upgrade process. A replica that fails during the upgrade may block the completion of the upgrade. Removal or other remedial action may be necessary to allow the upgrade to complete.
 
 - In order to determine if a Machine to be rolled out, KCP implements the following:
     - The infrastructureRef link used by each machine at creation time is stored in annotations at machine level.
     - The kubeadmConfigSpec used by each machine at creation time is stored in annotations at machine level.
-        - If the annotation is not present (machine is either old or adopted), we won't roll out on any possible changes made in KCP's ClusterConfiguration given that we don't have enough information to make a decision. Users should use KCP.Spec.UpgradeAfter field to force a rollout in this case.
+        - If the annotation is not present (machine is either old or adopted), we won't roll out on any possible changes made in KCP's ClusterConfiguration given that we don't have enough information to make a decision. Users should use KCP.Spec.RolloutAfter field to force a rollout in this case.
 
 ##### Rolling update strategy
 
 Currently KubeadmControlPlane supports only one rollout strategy type the `RollingUpdateStrategyType`. Rolling upgrade strategy's behavior can be modified by using `MaxSurge` field. The field values can be an absolute number 0 or 1.
 
-When `MaxSurge` is set to 1 the rollout algorithm is as follows:  
+When `MaxSurge` is set to 1 the rollout algorithm is as follows:
 
   - Find Machines that have an outdated spec
   - If there is a machine requiring rollout
@@ -472,7 +472,7 @@ When `MaxSurge` is set to 0 the rollout algorithm is as follows:
   for additional details. When there are multiple machines that are marked for remediation, the oldest one will be remediated first.
 
 - Following rules should be satisfied in order to start remediation
-  - The cluster MUST have spec.replicas >= 3, because this is the smallest cluster size that allows any etcd failure tolerance.
+  - The cluster MUST have at least two control plane machines, because this is the smallest cluster size that can be remediated.
   - The number of replicas MUST be equal to or greater than the desired replicas. This rule ensures that when the cluster
     is missing replicas, we skip remediation and instead perform regular scale up/rollout operations first.
   - The cluster MUST have no machines with a deletion timestamp. This rule prevents KCP taking actions while the cluster is in a transitional state.

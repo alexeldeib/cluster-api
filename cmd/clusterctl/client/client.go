@@ -30,7 +30,7 @@ type Client interface {
 	// GetProvidersConfig returns the list of providers configured for this instance of clusterctl.
 	GetProvidersConfig() ([]Provider, error)
 
-	// GetProviderComponents returns the provider components for a given provider with options including targetNamespace, watchingNamespace.
+	// GetProviderComponents returns the provider components for a given provider with options including targetNamespace.
 	GetProviderComponents(provider string, providerType clusterctlv1.ProviderType, options ComponentsOptions) (Components, error)
 
 	// Init initializes a management cluster by adding the requested list of providers.
@@ -51,11 +51,15 @@ type Client interface {
 	// Move moves all the Cluster API objects existing in a namespace (or from all the namespaces if empty) to a target management cluster.
 	Move(options MoveOptions) error
 
+	// Backup saves all the Cluster API objects existing in a namespace (or from all the namespaces if empty) to a target management cluster.
+	Backup(options BackupOptions) error
+
+	// Restore restores all the Cluster API objects existing in a configured directory based on a glob to a target management cluster.
+	Restore(options RestoreOptions) error
+
 	// PlanUpgrade returns a set of suggested Upgrade plans for the cluster, and more specifically:
-	// - Each management group gets separated upgrade plans.
-	// - For each management group, an upgrade plan is generated for each API Version of Cluster API (contract) available, e.g.
-	//   - Upgrade to the latest version in the the v1alpha2 series: ....
-	//   - Upgrade to the latest version in the the v1alpha3 series: ....
+	// - Upgrade to the latest version in the the v1alpha3 series: ....
+	// - Upgrade to the latest version in the the v1alpha4 series: ....
 	PlanUpgrade(options PlanUpgradeOptions) ([]UpgradePlan, error)
 
 	// PlanCertManagerUpgrade returns a CertManagerUpgradePlan.
@@ -105,20 +109,22 @@ type clusterctlClient struct {
 	alphaClient             alpha.Client
 }
 
-// RepositoryClientFactoryInput represents the inputs required by the
-// RepositoryClientFactory.
+// RepositoryClientFactoryInput represents the inputs required by the factory.
 type RepositoryClientFactoryInput struct {
 	Provider  Provider
 	Processor Processor
 }
+
+// RepositoryClientFactory is a factory of repository.Client from a given input.
 type RepositoryClientFactory func(RepositoryClientFactoryInput) (repository.Client, error)
 
-// ClusterClientFactoryInput reporesents the inputs required by the
-// ClusterClientFactory.
+// ClusterClientFactoryInput reporesents the inputs required by the factory.
 type ClusterClientFactoryInput struct {
 	Kubeconfig Kubeconfig
 	Processor  Processor
 }
+
+// ClusterClientFactory is a factory of cluster.Client from a given input.
 type ClusterClientFactory func(ClusterClientFactoryInput) (cluster.Client, error)
 
 // Ensure clusterctlClient implements Client.

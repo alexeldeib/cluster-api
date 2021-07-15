@@ -84,3 +84,13 @@ func Convert_v1beta2_JoinControlPlane_To_v1alpha4_JoinControlPlane(in *JoinContr
 	// JoinControlPlane.CertificateKey exists in v1beta2 types but not in bootstrapv1.JoinControlPlane (Cluster API does not uses automatic copy certs). Ignoring when converting.
 	return autoConvert_v1beta2_JoinControlPlane_To_v1alpha4_JoinControlPlane(in, out, s)
 }
+
+func Convert_v1beta2_DNS_To_v1alpha4_DNS(in *DNS, out *bootstrapv1.DNS, s apimachineryconversion.Scope) error {
+	// DNS.Type was removed in v1alpha4 because only CoreDNS is supported, dropping this info.
+	return autoConvert_v1beta2_DNS_To_v1alpha4_DNS(in, out, s)
+}
+
+func Convert_v1beta2_ClusterConfiguration_To_v1alpha4_ClusterConfiguration(in *ClusterConfiguration, out *bootstrapv1.ClusterConfiguration, s apimachineryconversion.Scope) error {
+	// ClusterConfiguration.UseHyperKubeImage was removed in kubeadm v1alpha4 API
+	return autoConvert_v1beta2_ClusterConfiguration_To_v1alpha4_ClusterConfiguration(in, out, s)
+}

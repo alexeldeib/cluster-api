@@ -3,20 +3,32 @@
 ## Minimum Go version
 
 - The Go version used by Cluster API is now Go 1.16+
-  - In case cloudbuild is used to push images, please upgrade to `gcr.io/k8s-testimages/gcb-docker-gcloud:v20210331-c732583` 
-    in the cloudbuild YAML files.  
+  - In case cloudbuild is used to push images, please upgrade to `gcr.io/k8s-testimages/gcb-docker-gcloud:v20210331-c732583`
+    in the cloudbuild YAML files.
 
 ## Controller Runtime version
 
 - The Controller Runtime version is now v0.9.+
 
+## Controller Tools version (if used)
+
+- The Controller Tools version is now v0.6.+
+
 ## Kind version
 
-- The KIND version used for this release is v0.9.x
+- The KIND version used for this release is v0.11.x
 
-## Upgrade kube-rbac-proxy to v0.8.0
+## :warning: Go Module changes :warning:
 
-- Find and replace the `kube-rbac-proxy` version (usually the image is `gcr.io/kubebuilder/kube-rbac-proxy`) and update it to `v0.8.0`.
+- The `test` folder now ships with its own Go module `sigs.k8s.io/cluster-api/test`.
+- The module is going to be tagged and versioned as part of the release.
+- Folks importing the test e2e framework or the docker infrastructure provider need to import the new module.
+  - When imported, the test module version should always match the Cluster API one.
+  - Add the following line in `go.mod` to replace the cluster-api dependency in the test module (change the version to your current Cluster API version):
+  ```
+  replace sigs.k8s.io/cluster-api => sigs.k8s.io/cluster-api v0.4.x
+  ```
+- The CAPD go module in test/infrastructure/docker has been removed.
 
 ## Klog version
 
@@ -115,7 +127,7 @@ Provider's `/config` folder has the same structure of  `/config` folder in CAPI 
     ```
     - "--metrics-bind-addr=127.0.0.1:8080"
     ```
-    - Verify that fetaure flags required by your container are properly set
+    - Verify that feature flags required by your container are properly set
       (as it was in `/config/webhook/manager_webhook_patch.yaml`).
 1. Edit the `/config/manager/manager_auth_proxy_patch.yaml` file:
     - Remove the patch for the container with name `manager`
@@ -182,8 +194,8 @@ should be executed before this changes.
 
 **Changes in the `/config/certmanager` folder:**
 
-1. Edit the `/config/certmanager/certificates.yaml` file and replace all the occurrences of `cert-manager.io/v1alpha2`
-with `cert-manager.io/v1`
+1. Edit the `/config/certmanager/certificate.yaml` file and replace all the occurrences of `cert-manager.io/v1alpha2`
+   with `cert-manager.io/v1`
 
 **Changes in the `/config/default` folder:**
 
@@ -245,3 +257,80 @@ with `cert-manager.io/v1`
   ```yaml
   serviceAccountName: manager
   ```
+
+## Percentage String or Int API input will fail with a string different from an integer with % appended.
+
+`MachineDeployment.Spec.Strategy.RollingUpdate.MaxSurge`, `MachineDeployment.Spec.Strategy.RollingUpdate.MaxUnavailable` and `MachineHealthCheck.Spec.MaxUnhealthy` would have previously taken a String value with an integer character in it e.g "3" as a valid input and process it as a percentage value.
+Only String values like "3%" or Int values e.g 3 are valid input values now. A string not matching the percentage format will fail, e.g "3".
+
+## Required change to support externally managed infrastructure.
+
+- A new annotation `cluster.x-k8s.io/managed-by` has been introduced that allows cluster infrastructure to be managed
+  externally.
+- When this annotation is added to an `InfraCluster` resource, the controller for these resources should not reconcile
+  the resource.
+- The `ResourceIsNotExternallyManaged` predicate is a useful helper to check for the annotation and the filter the resource easily:
+  ```go
+  c, err := ctrl.NewControllerManagedBy(mgr).
+		For(&providerv1.InfraCluster{}).
+		Watches(...).
+		WithOptions(options).
+		WithEventFilter(predicates.ResourceIsNotExternallyManaged(ctrl.LoggerFrom(ctx))).
+		Build(r)
+	if err != nil {
+		return errors.Wrap(err, "failed setting up with a controller manager")
+	}
+  ```
+- Note: this annotation also has to be checked in other cases, e.g. when watching for the Cluster resource.
+
+## MachinePool API group changed to `cluster.x-k8s.io`
+
+MachinePool is today an experiment, and the API group we originally decided to pick was `exp.cluster.x-k8s.io`. Given that the intent is in the future to move MachinePool to the core API group, we changed the experiment to use `cluster.x-k8s.io` group to avoid future breaking changes.
+
+All InfraMachinePool implementations should be moved to `infrastructure.cluster.x-k8s.io`. See `DockerMachinePool` for an example.
+
+Note that MachinePools are still experimental after this change and should still be feature gated.
+
+## Golangci-lint configuration
+
+There were a lot of new useful linters added to `.golangci.yml`. Of course it's not mandatory to use `golangci-lint` or
+a similar configuration, but it might make sense regardless. Please note there was previously an error in
+the `exclude` configuration which has been fixed in [#4657](https://github.com/kubernetes-sigs/cluster-api/pull/4657). As
+this configuration has been duplicated in a few other providers, it could be that you're also affected.
+
+# test/helpers.NewFakeClientWithScheme has been removed
+
+This function used to create a new fake client with the given scheme for testing,
+and all the objects given as input were initialized with a resource version of "1".
+The behavior of having a resource version in fake client has been fixed in controller-runtime,
+and this function isn't needed anymore.
+
+## Required kustomize changes to remove Kubeadm-rbac-proxy
+
+NB. instructions assumes "Required kustomize changes to have a single manager watching all namespaces and answer to webhook calls"
+should be executed before this changes.
+
+**Changes in the `/config/default` folder:**
+1. Edit `/config/default/kustomization.yaml` and remove the `manager_auth_proxy_patch.yaml` item from the `patchesStrategicMerge` list.
+1. Delete the `/config/default/manager_auth_proxy_patch.yaml` file.
+
+**Changes in the `/config/manager` folder:**
+1. Edit `/config/manager/manager.yaml` and remove the `--metrics-bind-addr=127.0.0.1:8080` arg from the `args` list.
+
+**Changes in the `/config/rbac` folder:**
+1. Edit `/config/rbac/kustomization.yaml` and remove following items from the `resources` list.
+   - `auth_proxy_service.yaml`
+   - `auth_proxy_role.yaml`
+   - `auth_proxy_role_binding.yaml`
+1. Delete the `/config/rbac/auth_proxy_service.yaml` file.
+1. Delete the `/config/rbac/auth_proxy_role.yaml` file.
+1. Delete the `/config/rbac/auth_proxy_role_binding.yaml` file.
+
+**Changes in the `main.go` file:**
+1. Change the default value for the `metrics-bind-addr` from `:8080` to `localhost:8080`
+
+## Required cluster template changes
+
+- `spec.infrastructureTemplate` has been moved to `spec.machineTemplate.infrastructureRef`. Thus, cluster templates which include `KubeadmControlPlane`
+have to be adjusted accordingly.
+- `spec.nodeDrainTimeout` has been moved to `spec.machineTemplate.nodeDrainTimeout`.

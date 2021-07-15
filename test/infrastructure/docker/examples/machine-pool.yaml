@@ -29,20 +29,24 @@ metadata:
   namespace: default
 spec:
   replicas: 1
-  version: v1.19.1
-  infrastructureTemplate:
-    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
-    kind: DockerMachineTemplate
-    name: controlplane
-    namespace: default
+  version: v1.21.2
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
+      kind: DockerMachineTemplate
+      name: controlplane
+      namespace: default
   kubeadmConfigSpec:
     clusterConfiguration:
       controllerManager:
         extraArgs:
-          enable-hostpath-provisioner: true
+          enable-hostpath-provisioner: "true"
     initConfiguration:
       nodeRegistration:
         kubeletExtraArgs:
+          # We have to pin the cgroupDriver to cgroupfs as kubeadm >=1.21 defaults to systemd
+          # kind will implement systemd support in: https://github.com/kubernetes-sigs/kind/issues/1726
+          cgroup-driver: cgroupfs
           eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
@@ -60,7 +64,7 @@ spec:
   template:
     spec: {}
 ---
-apiVersion: exp.cluster.x-k8s.io/v1alpha4
+apiVersion: cluster.x-k8s.io/v1alpha4
 kind: MachinePool
 metadata:
   name: worker-mp-0
@@ -78,13 +82,13 @@ spec:
           namespace: default
       clusterName: my-cluster
       infrastructureRef:
-        apiVersion: exp.infrastructure.cluster.x-k8s.io/v1alpha4
+        apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
         kind: DockerMachinePool
         name: worker-dmp-0
         namespace: default
-      version: v1.19.1
+      version: v1.21.2
 ---
-apiVersion: exp.infrastructure.cluster.x-k8s.io/v1alpha4
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha4
 kind: DockerMachinePool
 metadata:
   name: worker-dmp-0
@@ -99,4 +103,7 @@ spec:
   joinConfiguration:
     nodeRegistration:
       kubeletExtraArgs:
+        # We have to pin the cgroupDriver to cgroupfs as kubeadm >=1.21 defaults to systemd
+        # kind will implement systemd support in: https://github.com/kubernetes-sigs/kind/issues/1726
+        cgroup-driver: cgroupfs
         eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%

@@ -19,9 +19,8 @@ package util
 import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
-	coreV1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/scheme"
 )
 
@@ -40,7 +39,7 @@ func InspectImages(objs []unstructured.Unstructured) ([]string, error) {
 	for i := range objs {
 		o := objs[i]
 
-		var podSpec coreV1.PodSpec
+		var podSpec corev1.PodSpec
 
 		switch o.GetKind() {
 		case deploymentKind:
@@ -101,18 +100,6 @@ func IsResourceNamespaced(kind string) bool {
 	}
 }
 
-// IsSharedResource returns true if the resource lifecycle is shared.
-func IsSharedResource(o unstructured.Unstructured) bool {
-	lifecycle, ok := o.GetLabels()[clusterctlv1.ClusterctlResourceLifecyleLabelName]
-	if !ok {
-		return false
-	}
-	if lifecycle == string(clusterctlv1.ResourceLifecycleShared) {
-		return true
-	}
-	return false
-}
-
 // FixImages alters images using the give alter func
 // NB. The implemented approach is specific for the provider components YAML & for the cert-manager manifest; it is not
 // intended to cover all the possible objects used to deploy containers existing in Kubernetes.
@@ -165,7 +152,7 @@ func fixDaemonSetImages(o *unstructured.Unstructured, alterImageFunc func(image 
 	return scheme.Scheme.Convert(d, o, nil)
 }
 
-func fixPodSpecImages(podSpec *coreV1.PodSpec, alterImageFunc func(image string) (string, error)) error {
+func fixPodSpecImages(podSpec *corev1.PodSpec, alterImageFunc func(image string) (string, error)) error {
 	if err := fixContainersImage(podSpec.Containers, alterImageFunc); err != nil {
 		return errors.Wrapf(err, "failed to fix containers")
 	}
@@ -175,7 +162,7 @@ func fixPodSpecImages(podSpec *coreV1.PodSpec, alterImageFunc func(image string)
 	return nil
 }
 
-func fixContainersImage(containers []coreV1.Container, alterImageFunc func(image string) (string, error)) error {
+func fixContainersImage(containers []corev1.Container, alterImageFunc func(image string) (string, error)) error {
 	for j := range containers {
 		container := &containers[j]
 		image, err := alterImageFunc(container.Image)

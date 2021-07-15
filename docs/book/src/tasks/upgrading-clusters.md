@@ -49,14 +49,14 @@ and then both the `Version` and `InfrastructureTemplate` should be modified in a
 
 #### How to schedule a machine rollout
 
-A `KubeadmControlPlane` resource has a field `UpgradeAfter` that can be set to a timestamp
+A `KubeadmControlPlane` resource has a field `RolloutAfter` that can be set to a timestamp
 (RFC-3339) after which a rollout should be triggered regardless of whether there were any changes
 to the `KubeadmControlPlane.Spec` or not. This would roll out replacement control plane nodes
 which can be useful e.g. to perform certificate rotation, reflect changes to machine templates,
 move to new machines, etc.
 
 Note that this field can only be used for triggering a rollout, not for delaying one. Specifically,
-a rollout can also happen before the time specified in `UpgradeAfter` if any changes are made to
+a rollout can also happen before the time specified in `RolloutAfter` if any changes are made to
 the spec before that time.
 
 To do the same for machines managed by a `MachineDeployment` it's enough to make an arbitrary
@@ -79,6 +79,17 @@ transparently manage `MachineSet`s and `Machine`s to allow for a seamless scalin
 `MachineDeployment`s spec will begin a rolling update of the machines. Follow
 [these instructions](./change-machine-template.md) for changing the
 template for an existing `MachineDeployment`.
+
+`MachineDeployment`s support different strategies for rolling out changes to `Machines`:
+
+- RollingUpdate
+
+Changes are rolled out by honouring `MaxUnavailable` and `MaxSurge` values.
+Only values allowed are of type Int or Strings with an integer and percentage symbol e.g "5%".
+
+- OnDelete
+
+Changes are rolled out driven by the user or any entity deleting the old `Machines`. Only when a `Machine` is fully deleted a new one will come up.
 
 For a more in-depth look at how `MachineDeployments` manage scaling events, take a look at the [`MachineDeployment`
 controller documentation](../developer/architecture/controllers/machine-deployment.md) and the [`MachineSet` controller

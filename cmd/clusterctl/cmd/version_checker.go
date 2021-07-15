@@ -145,7 +145,7 @@ func (v *versionChecker) getLatestRelease() (*ReleaseInfo, error) {
 			log.V(1).Info("⚠️ Unable to get latest github release for clusterctl")
 			// failing silently here so we don't error out in air-gapped
 			// environments.
-			return nil, nil
+			return nil, nil // nolint:nilerr
 		}
 
 		vs = &VersionState{
@@ -172,10 +172,7 @@ func writeStateFile(path string, vs *VersionState) error {
 	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, vsb, 0600); err != nil {
-		return err
-	}
-	return nil
+	return os.WriteFile(path, vsb, 0600)
 }
 
 func readStateFile(filepath string) (*VersionState, error) {

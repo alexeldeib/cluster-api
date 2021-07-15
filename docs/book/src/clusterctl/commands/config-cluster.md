@@ -1,5 +1,14 @@
 # clusterctl config cluster
 
+<aside class="note warning">
+
+<h1> Warning! </h1>
+
+This command has been deprecated and it will be removed in future releases.
+Use [`clusterctl generate cluster`](generate-cluster.md).
+
+</aside>
+
 The `clusterctl config cluster` command returns a YAML template for creating a workload cluster.
 
 For example

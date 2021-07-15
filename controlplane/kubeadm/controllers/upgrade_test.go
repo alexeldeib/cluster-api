@@ -45,12 +45,11 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleUp(t *testing.T) {
 	cluster, kcp, genericMachineTemplate := createClusterWithControlPlane()
 	cluster.Spec.ControlPlaneEndpoint.Host = Host
 	cluster.Spec.ControlPlaneEndpoint.Port = 6443
-	//kcp.Spec.Version = Version
 	kcp.Spec.KubeadmConfigSpec.ClusterConfiguration = nil
 	kcp.Spec.Replicas = pointer.Int32Ptr(1)
 	setKCPHealthy(kcp)
 
-	fakeClient := newFakeClient(g, cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
+	fakeClient := newFakeClient(cluster.DeepCopy(), kcp.DeepCopy(), genericMachineTemplate.DeepCopy())
 
 	r := &KubeadmControlPlaneReconciler{
 		Client:   fakeClient,
@@ -135,7 +134,6 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleDown(t *testing.T) {
 	cluster, kcp, tmpl := createClusterWithControlPlane()
 	cluster.Spec.ControlPlaneEndpoint.Host = "nodomain.example.com1"
 	cluster.Spec.ControlPlaneEndpoint.Port = 6443
-	//kcp.Spec.Version = Version
 	kcp.Spec.Replicas = pointer.Int32Ptr(3)
 	kcp.Spec.RolloutStrategy.RollingUpdate.MaxSurge.IntVal = 0
 	setKCPHealthy(kcp)
@@ -153,7 +151,7 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleDown(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: cluster.Namespace,
 				Name:      name,
-				Labels:    internal.ControlPlaneLabelsForCluster(cluster.Name),
+				Labels:    internal.ControlPlaneMachineLabelsForCluster(kcp, cluster.Name),
 			},
 			Spec: clusterv1.MachineSpec{
 				Bootstrap: clusterv1.Bootstrap{
@@ -175,7 +173,7 @@ func TestKubeadmControlPlaneReconciler_RolloutStrategy_ScaleDown(t *testing.T) {
 		objs = append(objs, m, cfg)
 		fmc.Machines.Insert(m)
 	}
-	fakeClient := newFakeClient(g, objs...)
+	fakeClient := newFakeClient(objs...)
 	fmc.Reader = fakeClient
 	r := &KubeadmControlPlaneReconciler{
 		Client:                    fakeClient,

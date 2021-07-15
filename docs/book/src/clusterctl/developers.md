@@ -106,7 +106,7 @@ The above config file changes the location of the [overrides layer] folder thus 
 you dev session isn't hijacked by other local artifacts.
 
 With the only exception of the docker provider, the local repository folder does not contain cluster templates,
-so the `clusterctl config cluster` command will fail.
+so the `clusterctl generate cluster` command will fail.
 
 </aside>
 
@@ -178,8 +178,8 @@ When selecting the `--kubernetes-version`, ensure that the `kindest/node`
 image is available.
 
 For example, on [docker hub][kind-docker-hub] there is no
-image for version `v1.19.2`, therefore creating a CAPD workload cluster with
-`--kubernetes-version=v1.19.2` will fail. See [issue 3795] for more details.
+image for version `v1.21.2`, therefore creating a CAPD workload cluster with
+`--kubernetes-version=v1.21.2` will fail. See [issue 3795] for more details.
 
 ### Get the kubeconfig for the workload cluster
 
@@ -192,7 +192,7 @@ clusterctl get kubeconfig capi-quickstart > capi-quickstart.kubeconfig
 ### Fix kubeconfig (when using docker on MacOS)
 
 When using docker on MacOS, you will need to do a couple of additional
-steps to get the correct kubeconfig for a workload cluster created with the docker provider:
+steps to get the correct kubeconfig for a workload cluster created with the Docker provider:
 
 ```bash
 # Point the kubeconfig to the exposed port of the load balancer, rather than the inaccessible container IP.

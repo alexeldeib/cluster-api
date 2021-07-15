@@ -23,11 +23,11 @@ Users can customize the list of available providers using the `clusterctl` confi
 providers:
   # add a custom provider
   - name: "my-infra-provider"
-    url: "https://github.com/myorg/myrepo/releases/latest/infrastructure_components.yaml"
+    url: "https://github.com/myorg/myrepo/releases/latest/infrastructure-components.yaml"
     type: "InfrastructureProvider"
   # override a pre-defined provider
   - name: "cluster-api"
-    url: "https://github.com/myorg/myforkofclusterapi/releases/latest/core_components.yaml"
+    url: "https://github.com/myorg/myforkofclusterapi/releases/latest/core-components.yaml"
     type: "CoreProvider"
 ```
 
@@ -51,6 +51,43 @@ AWS_B64ENCODED_CREDENTIALS: XXXXXXXX
 
 In case a variable is defined both in the config file and as an OS environment variable,
 the environment variable takes precedence.
+
+## Cert-Manager configuration
+
+While doing init, clusterctl checks if there is a version of cert-manager already installed. If not, clusterctl will
+install a default version.
+
+By default, cert-manager will be fetched from `https://github.com/jetstack/cert-manager/releases`; however, if the user
+wants to use a different repository, it is possible to use the following configuration:
+
+```yaml
+cert-manager:
+  url: "/Users/foo/.cluster-api/dev-repository/cert-manager/latest/cert-manager.yaml"
+```
+
+Similarly, it is possible to override the default version installed by clusterctl by configuring:
+
+```yaml
+cert-manager:
+  ...
+  version: "v1.1.1"
+```
+
+For situations when resources are limited or the network is slow, the cert-manager wait time to be running can be customized by adding a field to the clusterctl config file, for example:
+
+```yaml
+
+```yaml
+cert-manager:
+  ...
+  timeout: 15m
+```
+
+The value string is a possibly signed sequence of decimal numbers, each with optional fraction and a unit suffix, such as "300ms", "-1.5h" or "2h45m". Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
+
+If no value is specified, or the format is invalid, the default value of 10 minutes will be used.
+
+Please note that the configuration above will be considered also when doing `clusterctl upgrade plan` or `clusterctl upgrade plan`.
 
 ## Overrides Layer
 
@@ -95,7 +132,7 @@ provider repositories.
 For example, you can now do:
 
 ```bash
-clusterctl config cluster mycluster --flavor dev --infrastructure aws:v0.5.0 -v5
+clusterctl generate cluster mycluster --flavor dev --infrastructure aws:v0.5.0 -v5
 ```
 
 The `-v5` provides verbose logging which will confirm the usage of the
@@ -171,18 +208,6 @@ images:
   cert-manager/cert-manager-cainjector:
     tag: v1.1.0
 ```
-
-## Cert-Manager timeout override
-
-For situations when resources are limited or the network is slow, the cert-manager wait time to be running can be customized by adding a field to the clusterctl config file, for example:
-
-```yaml
-  cert-manager-timeout: 15m
-```
-
-The value string is a possibly signed sequence of decimal numbers, each with optional fraction and a unit suffix, such as "300ms", "-1.5h" or "2h45m". Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
-
-If no value is specified or the format is invalid, the default value of 10 minutes will be used.
 
 ## Debugging/Logging
 

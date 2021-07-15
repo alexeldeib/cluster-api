@@ -21,31 +21,23 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
-
-	"github.com/google/go-cmp/cmp"
-	. "github.com/onsi/gomega"
 
 	"github.com/blang/semver"
+	"github.com/google/go-cmp/cmp"
+	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
-	cabpkv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestUpdateKubeProxyImageInfo(t *testing.T) {
-	g := NewWithT(t)
-
-	scheme := runtime.NewScheme()
-	g.Expect(appsv1.AddToScheme(scheme)).To(Succeed())
-
 	tests := []struct {
 		name        string
 		ds          appsv1.DaemonSet
@@ -90,7 +82,7 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			KCP: &v1alpha4.KubeadmControlPlane{
 				Spec: v1alpha4.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							ImageRepository: "foo.bar.example/baz/qux",
 						},
@@ -105,7 +97,7 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			KCP: &v1alpha4.KubeadmControlPlane{
 				Spec: v1alpha4.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							ImageRepository: "",
 						},
@@ -119,7 +111,7 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			KCP: &v1alpha4.KubeadmControlPlane{
 				Spec: v1alpha4.KubeadmControlPlaneSpec{
 					Version: "v1.16.3",
-					KubeadmConfigSpec: cabpkv1.KubeadmConfigSpec{
+					KubeadmConfigSpec: bootstrapv1.KubeadmConfigSpec{
 						ClusterConfiguration: &bootstrapv1.ClusterConfiguration{
 							ImageRepository: "%%%",
 						},
@@ -150,7 +142,7 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			objects := []client.Object{
 				&tt.ds,
 			}
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(objects...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -184,29 +176,28 @@ func TestRemoveMachineFromKubeadmConfigMap(t *testing.T) {
 			Namespace: metav1.NamespaceSystem,
 		},
 		Data: map[string]string{
-			clusterStatusKey: `apiEndpoints:
-  ip-10-0-0-1.ec2.internal:
-    advertiseAddress: 10.0.0.1
-    bindPort: 6443
-  ip-10-0-0-2.ec2.internal:
-    advertiseAddress: 10.0.0.2
-    bindPort: 6443
-    someFieldThatIsAddedInTheFuture: bar
-apiVersion: kubeadm.k8s.io/vNbetaM
-kind: ClusterStatus`,
+			clusterStatusKey: yaml.Raw(`
+				apiEndpoints:
+				  ip-10-0-0-1.ec2.internal:
+				    advertiseAddress: 10.0.0.1
+				    bindPort: 6443
+				  ip-10-0-0-2.ec2.internal:
+				    advertiseAddress: 10.0.0.2
+				    bindPort: 6443
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterStatus
+				`),
 		},
 		BinaryData: map[string][]byte{
 			"": nil,
 		},
 	}
-	kconfWithoutKey := kubeadmConfig.DeepCopy()
-	delete(kconfWithoutKey.Data, clusterStatusKey)
+	kubeadmConfigWithoutClusterStatus := kubeadmConfig.DeepCopy()
+	delete(kubeadmConfigWithoutClusterStatus.Data, clusterStatusKey)
 
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	tests := []struct {
 		name              string
+		kubernetesVersion semver.Version
 		machine           *clusterv1.Machine
 		objs              []client.Object
 		expectErr         bool
@@ -231,35 +222,51 @@ kind: ClusterStatus`,
 			expectErr: true,
 		},
 		{
-			name:      "returns error if unable to remove api endpoint",
-			machine:   machine,
-			objs:      []client.Object{kconfWithoutKey},
-			expectErr: true,
+			name:              "returns error if unable to find kubeadm-config for Kubernetes version < 1.22.0",
+			kubernetesVersion: semver.MustParse("1.19.1"),
+			machine:           machine,
+			objs:              []client.Object{kubeadmConfigWithoutClusterStatus},
+			expectErr:         true,
 		},
 		{
-			name:      "removes the machine node ref from kubeadm config",
-			machine:   machine,
-			objs:      []client.Object{kubeadmConfig},
-			expectErr: false,
-			expectedEndpoints: `apiEndpoints:
-  ip-10-0-0-2.ec2.internal:
-    advertiseAddress: 10.0.0.2
-    bindPort: 6443
-    someFieldThatIsAddedInTheFuture: bar
-apiVersion: kubeadm.k8s.io/vNbetaM
-kind: ClusterStatus
-`,
+			name:              "returns error if unable to remove api endpoint for Kubernetes version < 1.22.0",
+			kubernetesVersion: semver.MustParse("1.19.1"), // Kubernetes version < 1.22.0 has ClusterStatus
+			machine:           machine,
+			objs:              []client.Object{kubeadmConfigWithoutClusterStatus},
+			expectErr:         true,
+		},
+		{
+			name:              "removes the machine node ref from kubeadm config for Kubernetes version < 1.22.0",
+			kubernetesVersion: semver.MustParse("1.19.1"), // Kubernetes version < 1.22.0 has ClusterStatus
+			machine:           machine,
+			objs:              []client.Object{kubeadmConfig},
+			expectErr:         false,
+			expectedEndpoints: yaml.Raw(`
+				apiEndpoints:
+				  ip-10-0-0-2.ec2.internal:
+				    advertiseAddress: 10.0.0.2
+				    bindPort: 6443
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterStatus
+				`),
+		},
+		{
+			name:              "no op for Kubernetes version >= 1.22.0",
+			kubernetesVersion: minKubernetesVersionWithoutClusterStatus, // Kubernetes version >= 1.22.0 should not manage ClusterStatus
+			machine:           machine,
+			objs:              []client.Object{kubeadmConfigWithoutClusterStatus},
+			expectErr:         false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
-			err := w.RemoveMachineFromKubeadmConfigMap(ctx, tt.machine)
+			err := w.RemoveMachineFromKubeadmConfigMap(ctx, tt.machine, tt.kubernetesVersion)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 				return
@@ -272,16 +279,13 @@ kind: ClusterStatus
 					client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
 					&actualConfig,
 				)).To(Succeed())
-				g.Expect(actualConfig.Data[clusterStatusKey]).To(Equal(tt.expectedEndpoints))
+				g.Expect(actualConfig.Data[clusterStatusKey]).To(Equal(tt.expectedEndpoints), cmp.Diff(tt.expectedEndpoints, actualConfig.Data[clusterStatusKey]))
 			}
 		})
 	}
 }
 
 func TestUpdateKubeletConfigMap(t *testing.T) {
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	tests := []struct {
 		name               string
 		version            semver.Version
@@ -299,8 +303,10 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 					ResourceVersion: "some-resource-version",
 				},
 				Data: map[string]string{
-					kubeletConfigKey: "apiVersion: kubelet.config.k8s.io/v1beta1\n" +
-						"kind: KubeletConfiguration\n",
+					kubeletConfigKey: yaml.Raw(`
+						apiVersion: kubelet.config.k8s.io/v1beta1
+						kind: KubeletConfiguration
+						`),
 				},
 			}},
 			expectErr:          false,
@@ -316,8 +322,9 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 					ResourceVersion: "some-resource-version",
 				},
 				Data: map[string]string{
-					kubeletConfigKey: "apiVersion: kubelet.config.k8s.io/v1beta1\n" +
-						"kind: KubeletConfiguration\n",
+					kubeletConfigKey: yaml.Raw(`
+						apiVersion: kubelet.config.k8s.io/v1beta1
+						kind: KubeletConfiguration`),
 				},
 			}},
 			expectErr:          false,
@@ -333,9 +340,10 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 					ResourceVersion: "some-resource-version",
 				},
 				Data: map[string]string{
-					kubeletConfigKey: "apiVersion: kubelet.config.k8s.io/v1beta1\n" +
-						"kind: KubeletConfiguration\n" +
-						"cgroupDriver: foo\n",
+					kubeletConfigKey: yaml.Raw(`
+						apiVersion: kubelet.config.k8s.io/v1beta1
+						kind: KubeletConfiguration
+						cgroupDriver: foo`),
 				},
 			}},
 			expectErr:          false,
@@ -353,7 +361,7 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -375,510 +383,697 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 	}
 }
 
-func TestUpdateKubernetesVersionInKubeadmConfigMap(t *testing.T) {
-	kubeadmConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeadmConfigKey,
-			Namespace: metav1.NamespaceSystem,
-		},
-		Data: map[string]string{
-			clusterConfigurationKey: `
-apiVersion: kubeadm.k8s.io/v1beta2
-kind: ClusterConfiguration
-kubernetesVersion: v1.16.1
-`,
-		},
-	}
-
-	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
-	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
-
-	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
-	kubeadmConfigBadData.Data[clusterConfigurationKey] = `foobar`
-
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
+func TestUpdateUpdateClusterConfigurationInKubeadmConfigMap(t *testing.T) {
 	tests := []struct {
-		name      string
-		version   semver.Version
-		objs      []client.Object
-		expectErr bool
+		name          string
+		version       semver.Version
+		objs          []client.Object
+		mutator       func(*bootstrapv1.ClusterConfiguration)
+		wantConfigMap *corev1.ConfigMap
+		wantErr       bool
 	}{
 		{
-			name:      "updates the config map",
-			version:   semver.Version{Major: 1, Minor: 17, Patch: 2},
-			objs:      []client.Object{kubeadmConfig},
-			expectErr: false,
+			name:    "fails if missing config map",
+			version: semver.MustParse("1.17.2"),
+			objs:    nil,
+			wantErr: true,
 		},
 		{
-			name:      "returns error if cannot find config map",
-			version:   semver.Version{Major: 1, Minor: 2},
-			expectErr: true,
+			name:    "fail if config map without ClusterConfiguration data",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{},
+			}},
+			wantErr: true,
 		},
 		{
-			name:      "returns error if config has bad data",
-			version:   semver.Version{Major: 1, Minor: 2},
-			objs:      []client.Object{kubeadmConfigBadData},
-			expectErr: true,
+			name:    "fail if config map with invalid ClusterConfiguration data",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: "foo",
+				},
+			}},
+			wantErr: true,
 		},
 		{
-			name:      "returns error if config doesn't have cluster config key",
-			version:   semver.Version{Major: 1, Minor: 2},
-			objs:      []client.Object{kubeadmConfigNoKey},
-			expectErr: true,
+			name:    "no op if mutator does not apply changes",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: yaml.Raw(`
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterConfiguration
+						kubernetesVersion: v1.16.1
+						`),
+				},
+			}},
+			mutator: func(c *bootstrapv1.ClusterConfiguration) {},
+			wantConfigMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: yaml.Raw(`
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterConfiguration
+						kubernetesVersion: v1.16.1
+						`),
+				},
+			},
+		},
+		{
+			name:    "apply changes",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: yaml.Raw(`
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterConfiguration
+						kubernetesVersion: v1.16.1
+						`),
+				},
+			}},
+			mutator: func(c *bootstrapv1.ClusterConfiguration) {
+				c.KubernetesVersion = "v1.17.2"
+			},
+			wantConfigMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: yaml.Raw(`
+						apiServer: {}
+						apiVersion: kubeadm.k8s.io/v1beta2
+						controllerManager: {}
+						dns: {}
+						etcd: {}
+						kind: ClusterConfiguration
+						kubernetesVersion: v1.17.2
+						networking: {}
+						scheduler: {}
+						`),
+				},
+			},
+		},
+		{
+			name:    "converts kubeadm api version during mutation if required",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: yaml.Raw(`
+						apiVersion: kubeadm.k8s.io/v1beta1
+						kind: ClusterConfiguration
+						kubernetesVersion: v1.16.1
+						`),
+				},
+			}},
+			mutator: func(c *bootstrapv1.ClusterConfiguration) {
+				c.KubernetesVersion = "v1.17.2"
+			},
+			wantConfigMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: yaml.Raw(`
+						apiServer: {}
+						apiVersion: kubeadm.k8s.io/v1beta2
+						controllerManager: {}
+						dns: {}
+						etcd: {}
+						kind: ClusterConfiguration
+						kubernetesVersion: v1.17.2
+						networking: {}
+						scheduler: {}
+						`),
+				},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(tt.objs...).Build()
+
 			w := &Workload{
 				Client: fakeClient,
 			}
-			err := w.UpdateKubernetesVersionInKubeadmConfigMap(ctx, tt.version)
-			if tt.expectErr {
+			err := w.updateClusterConfiguration(ctx, tt.mutator, tt.version)
+			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
 			g.Expect(err).ToNot(HaveOccurred())
+
 			var actualConfig corev1.ConfigMap
 			g.Expect(w.Client.Get(
 				ctx,
 				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
 				&actualConfig,
 			)).To(Succeed())
-			g.Expect(actualConfig.Data[clusterConfigurationKey]).To(ContainSubstring("kubernetesVersion: v1.17.2"))
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).To(Equal(tt.wantConfigMap.Data[clusterConfigurationKey]), cmp.Diff(tt.wantConfigMap.Data[clusterConfigurationKey], actualConfig.Data[clusterConfigurationKey]))
+		})
+	}
+}
+
+func TestUpdateUpdateClusterStatusInKubeadmConfigMap(t *testing.T) {
+	tests := []struct {
+		name          string
+		version       semver.Version
+		objs          []client.Object
+		mutator       func(status *bootstrapv1.ClusterStatus)
+		wantConfigMap *corev1.ConfigMap
+		wantErr       bool
+	}{
+		{
+			name:    "fails if missing config map",
+			version: semver.MustParse("1.17.2"),
+			objs:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "fail if config map without ClusterStatus data",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{},
+			}},
+			wantErr: true,
+		},
+		{
+			name:    "fail if config map with invalid ClusterStatus data",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: "foo",
+				},
+			}},
+			wantErr: true,
+		},
+		{
+			name:    "no op if mutator does not apply changes",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: yaml.Raw(`
+						apiEndpoints:
+						  ip-10-0-0-1.ec2.internal:
+						    advertiseAddress: 10.0.0.1
+						    bindPort: 6443
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterStatus
+						`),
+				},
+			}},
+			mutator: func(status *bootstrapv1.ClusterStatus) {},
+			wantConfigMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: yaml.Raw(`
+						apiEndpoints:
+						  ip-10-0-0-1.ec2.internal:
+						    advertiseAddress: 10.0.0.1
+						    bindPort: 6443
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterStatus
+						`),
+				},
+			},
+		},
+		{
+			name:    "apply changes",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: yaml.Raw(`
+						apiEndpoints:
+						  ip-10-0-0-1.ec2.internal:
+						    advertiseAddress: 10.0.0.1
+						    bindPort: 6443
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterStatus
+						`),
+				},
+			}},
+			mutator: func(status *bootstrapv1.ClusterStatus) {
+				status.APIEndpoints["ip-10-0-0-2.ec2.internal"] = bootstrapv1.APIEndpoint{}
+			},
+			wantConfigMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: yaml.Raw(`
+						apiEndpoints:
+						  ip-10-0-0-1.ec2.internal:
+						    advertiseAddress: 10.0.0.1
+						    bindPort: 6443
+						  ip-10-0-0-2.ec2.internal: {}
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterStatus
+						`),
+				},
+			},
+		},
+		{
+			name:    "converts kubeadm api version during mutation if required",
+			version: semver.MustParse("1.17.2"),
+			objs: []client.Object{&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: yaml.Raw(`
+						apiEndpoints:
+						  ip-10-0-0-1.ec2.internal:
+						    advertiseAddress: 10.0.0.1
+						    bindPort: 6443
+						apiVersion: kubeadm.k8s.io/v1beta1
+						kind: ClusterStatus
+						`),
+				},
+			}},
+			mutator: func(status *bootstrapv1.ClusterStatus) {
+				status.APIEndpoints["ip-10-0-0-2.ec2.internal"] = bootstrapv1.APIEndpoint{}
+			},
+			wantConfigMap: &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterStatusKey: yaml.Raw(`
+						apiEndpoints:
+						  ip-10-0-0-1.ec2.internal:
+						    advertiseAddress: 10.0.0.1
+						    bindPort: 6443
+						  ip-10-0-0-2.ec2.internal: {}
+						apiVersion: kubeadm.k8s.io/v1beta2
+						kind: ClusterStatus
+						`),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithObjects(tt.objs...).Build()
+
+			w := &Workload{
+				Client: fakeClient,
+			}
+			err := w.updateClusterStatus(ctx, tt.mutator, tt.version)
+			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
+				return
+			}
+			g.Expect(err).ToNot(HaveOccurred())
+
+			var actualConfig corev1.ConfigMap
+			g.Expect(w.Client.Get(
+				ctx,
+				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
+				&actualConfig,
+			)).To(Succeed())
+			g.Expect(actualConfig.Data[clusterStatusKey]).To(Equal(tt.wantConfigMap.Data[clusterStatusKey]), cmp.Diff(tt.wantConfigMap.Data[clusterStatusKey], actualConfig.Data[clusterStatusKey]))
+		})
+	}
+}
+
+func TestUpdateKubernetesVersionInKubeadmConfigMap(t *testing.T) {
+	tests := []struct {
+		name                     string
+		version                  semver.Version
+		clusterConfigurationData string
+	}{
+		{
+			name:    "updates the config map and changes the kubeadm API version",
+			version: semver.MustParse("1.17.2"),
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta1
+				kind: ClusterConfiguration
+				kubernetesVersion: v1.16.1`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithObjects(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: tt.clusterConfigurationData,
+				},
+			}).Build()
+
+			w := &Workload{
+				Client: fakeClient,
+			}
+			err := w.UpdateKubernetesVersionInKubeadmConfigMap(ctx, tt.version)
+			g.Expect(err).ToNot(HaveOccurred())
+
+			var actualConfig corev1.ConfigMap
+			g.Expect(w.Client.Get(
+				ctx,
+				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
+				&actualConfig,
+			)).To(Succeed())
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).To(ContainSubstring(tt.version.String()))
 		})
 	}
 }
 
 func TestUpdateImageRepositoryInKubeadmConfigMap(t *testing.T) {
-	kubeadmConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeadmConfigKey,
-			Namespace: metav1.NamespaceSystem,
-		},
-		Data: map[string]string{
-			clusterConfigurationKey: `
-apiVersion: kubeadm.k8s.io/v1beta2
-kind: ClusterConfiguration
-imageRepository: k8s.gcr.io
-`,
-		},
-	}
-
-	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
-	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
-
-	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
-	kubeadmConfigBadData.Data[clusterConfigurationKey] = `foobar`
-
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	tests := []struct {
-		name            string
-		imageRepository string
-		objs            []client.Object
-		expectErr       bool
+		name                     string
+		clusterConfigurationData string
+		newImageRepository       string
+		wantImageRepository      string
 	}{
 		{
-			name:            "updates the config map",
-			imageRepository: "myspecialrepo.io",
-			objs:            []client.Object{kubeadmConfig},
-			expectErr:       false,
+			name: "it should set the image repository",
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterConfiguration`),
+			newImageRepository:  "example.com/k8s",
+			wantImageRepository: "example.com/k8s",
 		},
 		{
-			name:      "returns error if cannot find config map",
-			expectErr: true,
-		},
-		{
-			name:            "returns error if config has bad data",
-			objs:            []client.Object{kubeadmConfigBadData},
-			imageRepository: "myspecialrepo.io",
-			expectErr:       true,
-		},
-		{
-			name:            "returns error if config doesn't have cluster config key",
-			objs:            []client.Object{kubeadmConfigNoKey},
-			imageRepository: "myspecialrepo.io",
-			expectErr:       true,
+			name: "it should preserve the existing image repository if then new value is empty",
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterConfiguration
+				imageRepository: foo.bar/baz.io`),
+			newImageRepository:  "",
+			wantImageRepository: "foo.bar/baz.io",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: tt.clusterConfigurationData,
+				},
+			}).Build()
+
 			w := &Workload{
 				Client: fakeClient,
 			}
-			err := w.UpdateImageRepositoryInKubeadmConfigMap(ctx, tt.imageRepository)
-			if tt.expectErr {
-				g.Expect(err).To(HaveOccurred())
-				return
-			}
+			err := w.UpdateImageRepositoryInKubeadmConfigMap(ctx, tt.newImageRepository, semver.MustParse("1.19.1"))
 			g.Expect(err).ToNot(HaveOccurred())
+
 			var actualConfig corev1.ConfigMap
 			g.Expect(w.Client.Get(
 				ctx,
 				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
 				&actualConfig,
 			)).To(Succeed())
-			g.Expect(actualConfig.Data[clusterConfigurationKey]).To(ContainSubstring(tt.imageRepository))
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).To(ContainSubstring(tt.wantImageRepository))
 		})
 	}
 }
 
 func TestUpdateApiServerInKubeadmConfigMap(t *testing.T) {
-	validAPIServerConfig := `apiServer:
-  certSANs:
-  - foo
-  extraArgs:
-    foo: bar
-  extraVolumes:
-  - hostPath: /foo/bar
-    mountPath: /bar/baz
-    name: mount1
-  timeoutForControlPlane: 3m0s
-apiVersion: kubeadm.k8s.io/v1beta2
-kind: ClusterConfiguration
-`
-	kubeadmConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeadmConfigKey,
-			Namespace: metav1.NamespaceSystem,
-		},
-		Data: map[string]string{
-			clusterConfigurationKey: validAPIServerConfig,
-		},
-	}
-
-	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
-	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
-
-	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
-	kubeadmConfigBadData.Data[clusterConfigurationKey] = `badConfigAPIServer`
-
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	tests := []struct {
-		name              string
-		apiServer         bootstrapv1.APIServer
-		objs              []client.Object
-		expectErr         bool
-		expectedChanged   bool
-		expectedAPIServer string
+		name                     string
+		clusterConfigurationData string
+		newAPIServer             bootstrapv1.APIServer
+		wantClusterConfiguration string
 	}{
 		{
-			name:            "updates the config map",
-			apiServer:       bootstrapv1.APIServer{CertSANs: []string{"foo", "bar"}},
-			objs:            []client.Object{kubeadmConfig},
-			expectErr:       false,
-			expectedChanged: true,
-			expectedAPIServer: `apiServer:
-  certSANs:
-  - foo
-  - bar
-apiVersion: kubeadm.k8s.io/v1beta2
-kind: ClusterConfiguration
-`,
-		},
-		{
-			name:              "returns error if cannot find config map",
-			expectErr:         true,
-			expectedAPIServer: validAPIServerConfig,
-		},
-		{
-			name:              "returns error if config has bad data",
-			objs:              []client.Object{kubeadmConfigBadData},
-			apiServer:         bootstrapv1.APIServer{CertSANs: []string{"foo", "bar"}},
-			expectErr:         true,
-			expectedAPIServer: validAPIServerConfig,
-		},
-		{
-			name:              "returns error if config doesn't have cluster config key",
-			objs:              []client.Object{kubeadmConfigNoKey},
-			apiServer:         bootstrapv1.APIServer{CertSANs: []string{"foo", "bar"}},
-			expectErr:         true,
-			expectedAPIServer: validAPIServerConfig,
-		},
-		{
-			name:            "should not update config map if no changes are detected",
-			objs:            []client.Object{kubeadmConfig},
-			expectedChanged: false,
-			apiServer: bootstrapv1.APIServer{
+			name: "it should set the api server config",
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterConfiguration
+				`),
+			newAPIServer: bootstrapv1.APIServer{
 				ControlPlaneComponent: bootstrapv1.ControlPlaneComponent{
-					ExtraArgs:    map[string]string{"foo": "bar"},
-					ExtraVolumes: []bootstrapv1.HostPathMount{{Name: "mount1", HostPath: "/foo/bar", MountPath: "/bar/baz"}},
+					ExtraArgs: map[string]string{
+						"bar":     "baz",
+						"someKey": "someVal",
+					},
+					ExtraVolumes: []bootstrapv1.HostPathMount{
+						{
+							Name:      "mount2",
+							HostPath:  "/bar/baz",
+							MountPath: "/foo/bar",
+						},
+					},
 				},
-				CertSANs:               []string{"foo"},
-				TimeoutForControlPlane: &metav1.Duration{Duration: 3 * time.Minute},
 			},
-			expectedAPIServer: validAPIServerConfig,
+			wantClusterConfiguration: yaml.Raw(`
+				apiServer:
+				  extraArgs:
+				    bar: baz
+				    someKey: someVal
+				  extraVolumes:
+				  - hostPath: /bar/baz
+				    mountPath: /foo/bar
+				    name: mount2
+				apiVersion: kubeadm.k8s.io/v1beta2
+				controllerManager: {}
+				dns: {}
+				etcd: {}
+				kind: ClusterConfiguration
+				networking: {}
+				scheduler: {}
+				`),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithObjects(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: tt.clusterConfigurationData,
+				},
+			}).Build()
 
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
-
-			err := w.UpdateAPIServerInKubeadmConfigMap(ctx, tt.apiServer)
-			if tt.expectErr {
-				g.Expect(err).To(HaveOccurred())
-				return
-			}
+			err := w.UpdateAPIServerInKubeadmConfigMap(ctx, tt.newAPIServer, semver.MustParse("1.19.1"))
 			g.Expect(err).ToNot(HaveOccurred())
+
 			var actualConfig corev1.ConfigMap
 			g.Expect(w.Client.Get(
 				ctx,
 				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
 				&actualConfig,
 			)).To(Succeed())
-			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.expectedAPIServer), cmp.Diff(actualConfig.Data[clusterConfigurationKey], tt.expectedAPIServer))
-
-			// check resource version to see if client.update was called or not
-			if !tt.expectedChanged {
-				g.Expect(tt.objs[0].GetResourceVersion()).Should(Equal(actualConfig.ResourceVersion))
-			} else {
-				g.Expect(tt.objs[0].GetResourceVersion()).ShouldNot(Equal(actualConfig.ResourceVersion))
-			}
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.wantClusterConfiguration), cmp.Diff(tt.wantClusterConfiguration, actualConfig.Data[clusterConfigurationKey]))
 		})
 	}
 }
 
 func TestUpdateControllerManagerInKubeadmConfigMap(t *testing.T) {
-	validControllerManagerConfig := `apiVersion: kubeadm.k8s.io/v1beta2
-controllerManager:
-  extraArgs:
-    foo: bar
-  extraVolumes:
-  - hostPath: /foo/bar
-    mountPath: /bar/baz
-    name: mount1
-kind: ClusterConfiguration
-`
-	kubeadmConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeadmConfigKey,
-			Namespace: metav1.NamespaceSystem,
-		},
-		Data: map[string]string{
-			clusterConfigurationKey: validControllerManagerConfig,
-		},
-	}
-
-	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
-	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
-
-	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
-	kubeadmConfigBadData.Data[clusterConfigurationKey] = `badConfigControllerManager`
-
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	tests := []struct {
-		name                      string
-		controllerManager         bootstrapv1.ControlPlaneComponent
-		objs                      []client.Object
-		expectErr                 bool
-		expectedChanged           bool
-		expectedControllerManager string
+		name                     string
+		clusterConfigurationData string
+		newControllerManager     bootstrapv1.ControlPlaneComponent
+		wantClusterConfiguration string
 	}{
 		{
-			name:              "updates the config map",
-			controllerManager: bootstrapv1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
-			objs:              []client.Object{kubeadmConfig},
-			expectErr:         false,
-			expectedChanged:   true,
-			expectedControllerManager: `apiVersion: kubeadm.k8s.io/v1beta2
-controllerManager:
-  extraArgs:
-    foo: bar
-kind: ClusterConfiguration
-`,
-		},
-		{
-			name:                      "returns error if cannot find config map",
-			expectErr:                 true,
-			expectedControllerManager: validControllerManagerConfig,
-		},
-		{
-			name:                      "returns error if config has bad data",
-			objs:                      []client.Object{kubeadmConfigBadData},
-			controllerManager:         bootstrapv1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
-			expectErr:                 true,
-			expectedControllerManager: validControllerManagerConfig,
-		},
-		{
-			name:                      "returns error if config doesn't have cluster config key",
-			objs:                      []client.Object{kubeadmConfigNoKey},
-			controllerManager:         bootstrapv1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
-			expectErr:                 true,
-			expectedControllerManager: validControllerManagerConfig,
-		},
-		{
-			name:            "should not update config map if no changes are detected",
-			objs:            []client.Object{kubeadmConfig},
-			expectedChanged: false,
-			controllerManager: bootstrapv1.ControlPlaneComponent{
-				ExtraArgs:    map[string]string{"foo": "bar"},
-				ExtraVolumes: []bootstrapv1.HostPathMount{{Name: "mount1", HostPath: "/foo/bar", MountPath: "/bar/baz"}},
+			name: "it should set the controller manager config",
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterConfiguration
+				`),
+			newControllerManager: bootstrapv1.ControlPlaneComponent{
+				ExtraArgs: map[string]string{
+					"bar":     "baz",
+					"someKey": "someVal",
+				},
+				ExtraVolumes: []bootstrapv1.HostPathMount{
+					{
+						Name:      "mount2",
+						HostPath:  "/bar/baz",
+						MountPath: "/foo/bar",
+					},
+				},
 			},
-			expectedControllerManager: validControllerManagerConfig,
+			wantClusterConfiguration: yaml.Raw(`
+				apiServer: {}
+				apiVersion: kubeadm.k8s.io/v1beta2
+				controllerManager:
+				  extraArgs:
+				    bar: baz
+				    someKey: someVal
+				  extraVolumes:
+				  - hostPath: /bar/baz
+				    mountPath: /foo/bar
+				    name: mount2
+				dns: {}
+				etcd: {}
+				kind: ClusterConfiguration
+				networking: {}
+				scheduler: {}
+				`),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithObjects(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: tt.clusterConfigurationData,
+				},
+			}).Build()
 
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
-			err := w.UpdateControllerManagerInKubeadmConfigMap(ctx, tt.controllerManager)
-			if tt.expectErr {
-				g.Expect(err).To(HaveOccurred())
-				return
-			}
+			err := w.UpdateControllerManagerInKubeadmConfigMap(ctx, tt.newControllerManager, semver.MustParse("1.19.1"))
 			g.Expect(err).ToNot(HaveOccurred())
+
 			var actualConfig corev1.ConfigMap
 			g.Expect(w.Client.Get(
 				ctx,
 				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
 				&actualConfig,
 			)).To(Succeed())
-			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.expectedControllerManager), cmp.Diff(actualConfig.Data[clusterConfigurationKey], tt.expectedControllerManager))
-
-			// check resource version to see if client.update was called or not
-			if !tt.expectedChanged {
-				g.Expect(tt.objs[0].GetResourceVersion()).Should(Equal(actualConfig.ResourceVersion))
-			} else {
-				g.Expect(tt.objs[0].GetResourceVersion()).ShouldNot(Equal(actualConfig.ResourceVersion))
-			}
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.wantClusterConfiguration), cmp.Diff(tt.wantClusterConfiguration, actualConfig.Data[clusterConfigurationKey]))
 		})
 	}
 }
 
 func TestUpdateSchedulerInKubeadmConfigMap(t *testing.T) {
-	validSchedulerConfig := `apiVersion: kubeadm.k8s.io/v1beta2
-kind: ClusterConfiguration
-scheduler:
-  extraArgs:
-    foo: bar
-  extraVolumes:
-  - hostPath: /foo/bar
-    mountPath: /bar/baz
-    name: mount1
-`
-	kubeadmConfig := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      kubeadmConfigKey,
-			Namespace: metav1.NamespaceSystem,
-		},
-		Data: map[string]string{
-			clusterConfigurationKey: validSchedulerConfig,
-		},
-	}
-
-	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
-	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
-
-	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
-	kubeadmConfigBadData.Data[clusterConfigurationKey] = `badConfigScheduler`
-
-	g := NewWithT(t)
-	scheme := runtime.NewScheme()
-	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	tests := []struct {
-		name              string
-		scheduler         bootstrapv1.ControlPlaneComponent
-		objs              []client.Object
-		expectErr         bool
-		expectedChanged   bool
-		expectedScheduler string
+		name                     string
+		clusterConfigurationData string
+		newScheduler             bootstrapv1.ControlPlaneComponent
+		wantClusterConfiguration string
 	}{
 		{
-			name:            "updates the config map",
-			scheduler:       bootstrapv1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
-			objs:            []client.Object{kubeadmConfig},
-			expectErr:       false,
-			expectedChanged: true,
-			expectedScheduler: `apiVersion: kubeadm.k8s.io/v1beta2
-kind: ClusterConfiguration
-scheduler:
-  extraArgs:
-    foo: bar
-`,
-		},
-		{
-			name:              "returns error if cannot find config map",
-			expectErr:         true,
-			expectedScheduler: validSchedulerConfig,
-		},
-		{
-			name:              "returns error if config has bad data",
-			objs:              []client.Object{kubeadmConfigBadData},
-			scheduler:         bootstrapv1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
-			expectErr:         true,
-			expectedScheduler: validSchedulerConfig,
-		},
-		{
-			name:              "returns error if config doesn't have cluster config key",
-			objs:              []client.Object{kubeadmConfigNoKey},
-			scheduler:         bootstrapv1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
-			expectErr:         true,
-			expectedScheduler: validSchedulerConfig,
-		},
-		{
-			name:            "should not update config map if no changes are detected",
-			objs:            []client.Object{kubeadmConfig},
-			expectedChanged: false,
-			scheduler: bootstrapv1.ControlPlaneComponent{
-				ExtraArgs:    map[string]string{"foo": "bar"},
-				ExtraVolumes: []bootstrapv1.HostPathMount{{Name: "mount1", HostPath: "/foo/bar", MountPath: "/bar/baz"}},
+			name: "it should set the scheduler config",
+			clusterConfigurationData: yaml.Raw(`
+				apiVersion: kubeadm.k8s.io/v1beta2
+				kind: ClusterConfiguration
+				`),
+			newScheduler: bootstrapv1.ControlPlaneComponent{
+				ExtraArgs: map[string]string{
+					"bar":     "baz",
+					"someKey": "someVal",
+				},
+				ExtraVolumes: []bootstrapv1.HostPathMount{
+					{
+						Name:      "mount2",
+						HostPath:  "/bar/baz",
+						MountPath: "/foo/bar",
+					},
+				},
 			},
-			expectedScheduler: validSchedulerConfig,
+			wantClusterConfiguration: yaml.Raw(`
+				apiServer: {}
+				apiVersion: kubeadm.k8s.io/v1beta2
+				controllerManager: {}
+				dns: {}
+				etcd: {}
+				kind: ClusterConfiguration
+				networking: {}
+				scheduler:
+				  extraArgs:
+				    bar: baz
+				    someKey: someVal
+				  extraVolumes:
+				  - hostPath: /bar/baz
+				    mountPath: /foo/bar
+				    name: mount2
+				`),
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithObjects(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      kubeadmConfigKey,
+					Namespace: metav1.NamespaceSystem,
+				},
+				Data: map[string]string{
+					clusterConfigurationKey: tt.clusterConfigurationData,
+				},
+			}).Build()
 
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
-			err := w.UpdateSchedulerInKubeadmConfigMap(ctx, tt.scheduler)
-			if tt.expectErr {
-				g.Expect(err).To(HaveOccurred())
-				return
-			}
+			err := w.UpdateSchedulerInKubeadmConfigMap(ctx, tt.newScheduler, semver.MustParse("1.19.1"))
 			g.Expect(err).ToNot(HaveOccurred())
+
 			var actualConfig corev1.ConfigMap
 			g.Expect(w.Client.Get(
 				ctx,
 				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
 				&actualConfig,
 			)).To(Succeed())
-			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.expectedScheduler))
-
-			// check resource version to see if client.update was called or not
-			if !tt.expectedChanged {
-				g.Expect(tt.objs[0].GetResourceVersion()).Should(Equal(actualConfig.ResourceVersion))
-			} else {
-				g.Expect(tt.objs[0].GetResourceVersion()).ShouldNot(Equal(actualConfig.ResourceVersion))
-			}
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.wantClusterConfiguration), cmp.Diff(tt.wantClusterConfiguration, actualConfig.Data[clusterConfigurationKey]))
 		})
 	}
 }
@@ -941,9 +1136,7 @@ func TestClusterStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			scheme := runtime.NewScheme()
-			g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			fakeClient := fake.NewClientBuilder().WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}

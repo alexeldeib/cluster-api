@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package feature implements feature functionality.
 package feature
 
 import (
@@ -28,9 +29,13 @@ const (
 	// // alpha: v1.X
 	// MyFeature featuregate.Feature = "MyFeature".
 
+	// MachinePool is a feature gate for MachinePool functionality.
+	//
 	// alpha: v0.3
 	MachinePool featuregate.Feature = "MachinePool"
 
+	// ClusterResourceSet is a feature gate for the ClusterResourceSet functionality.
+	//
 	// alpha: v0.3
 	ClusterResourceSet featuregate.Feature = "ClusterResourceSet"
 )

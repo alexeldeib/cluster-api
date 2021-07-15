@@ -75,17 +75,15 @@ func Test_componentsClient_Get(t *testing.T) {
 		processor  yaml.Processor
 	}
 	type args struct {
-		version           string
-		targetNamespace   string
-		watchingNamespace string
-		skipVariables     bool
+		version         string
+		targetNamespace string
+		skipVariables   bool
 	}
 	type want struct {
-		provider          config.Provider
-		version           string
-		targetNamespace   string
-		watchingNamespace string
-		variables         []string
+		provider        config.Provider
+		version         string
+		targetNamespace string
+		variables       []string
 	}
 	tests := []struct {
 		name    string
@@ -104,21 +102,19 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(namespaceYaml, controllerYaml, configMapYaml)),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "",
 			},
 			want: want{
-				provider:          p1,
-				version:           "v1.0.0",      // version detected
-				targetNamespace:   namespaceName, // default targetNamespace detected
-				watchingNamespace: "",
-				variables:         []string{variableName}, // variable detected
+				provider:        p1,
+				version:         "v1.0.0",               // version detected
+				targetNamespace: namespaceName,          // default targetNamespace detected
+				variables:       []string{variableName}, // variable detected
 			},
 			wantErr: false,
 		},
 		{
-			name: "successfully gets the components even with SkipVariables defined",
+			name: "successfully gets the components even with SkipTemplateProcess defined",
 			fields: fields{
 				provider: p1,
 				repository: test.NewFakeRepository().
@@ -127,17 +123,15 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(namespaceYaml, controllerYaml, configMapYaml)),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "",
-				watchingNamespace: "",
-				skipVariables:     true,
+				version:         "v1.0.0",
+				targetNamespace: "",
+				skipVariables:   true,
 			},
 			want: want{
-				provider:          p1,
-				version:           "v1.0.0",      // version detected
-				targetNamespace:   namespaceName, // default targetNamespace detected
-				watchingNamespace: "",
-				variables:         []string{variableName}, // variable detected
+				provider:        p1,
+				version:         "v1.0.0",               // version detected
+				targetNamespace: namespaceName,          // default targetNamespace detected
+				variables:       []string{variableName}, // variable detected
 			},
 			wantErr: false,
 		},
@@ -151,39 +145,14 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(namespaceYaml, controllerYaml, configMapYaml)),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "ns2",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "ns2",
 			},
 			want: want{
-				provider:          p1,
-				version:           "v1.0.0", // version detected
-				targetNamespace:   "ns2",    // targetNamespace overrides default targetNamespace
-				watchingNamespace: "",
-				variables:         []string{variableName}, // variable detected
-			},
-			wantErr: false,
-		},
-		{
-			name: "watchingNamespace overrides default watchingNamespace",
-			fields: fields{
-				provider: p1,
-				repository: test.NewFakeRepository().
-					WithPaths("root", "components.yaml").
-					WithDefaultVersion("v1.0.0").
-					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(namespaceYaml, controllerYaml, configMapYaml)),
-			},
-			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "",
-				watchingNamespace: "ns2",
-			},
-			want: want{
-				provider:          p1,
-				version:           "v1.0.0",               // version detected
-				targetNamespace:   namespaceName,          // default targetNamespace detected
-				watchingNamespace: "ns2",                  // watchingNamespace overrides default watchingNamespace
-				variables:         []string{variableName}, // variable detected
+				provider:        p1,
+				version:         "v1.0.0",               // version detected
+				targetNamespace: "ns2",                  // targetNamespace overrides default targetNamespace
+				variables:       []string{variableName}, // variable detected
 			},
 			wantErr: false,
 		},
@@ -196,9 +165,8 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithDefaultVersion("v1.0.0"),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "",
 			},
 			wantErr: true,
 		},
@@ -212,9 +180,8 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(controllerYaml, configMapYaml)),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "",
 			},
 			wantErr: true,
 		},
@@ -228,16 +195,14 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(controllerYaml, configMapYaml)),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "ns2",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "ns2",
 			},
 			want: want{
-				provider:          p1,
-				version:           "v1.0.0", // version detected
-				targetNamespace:   "ns2",    // target targetNamespace applied
-				watchingNamespace: "",
-				variables:         []string{variableName}, // variable detected
+				provider:        p1,
+				version:         "v1.0.0",               // version detected
+				targetNamespace: "ns2",                  // target targetNamespace applied
+				variables:       []string{variableName}, // variable detected
 			},
 			wantErr: false,
 		},
@@ -251,9 +216,8 @@ func Test_componentsClient_Get(t *testing.T) {
 					WithFile("v1.0.0", "components.yaml", utilyaml.JoinYaml(controllerYaml, configMapYaml)),
 			},
 			args: args{
-				version:           "v2.0.0",
-				targetNamespace:   "",
-				watchingNamespace: "",
+				version:         "v2.0.0",
+				targetNamespace: "",
 			},
 			wantErr: true,
 		},
@@ -268,9 +232,8 @@ func Test_componentsClient_Get(t *testing.T) {
 				processor: test.NewFakeProcessor().WithGetVariablesErr(errors.New("cannot get vars")),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "default",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "default",
 			},
 			wantErr: true,
 		},
@@ -286,9 +249,8 @@ func Test_componentsClient_Get(t *testing.T) {
 				processor: test.NewFakeProcessor().WithProcessErr(errors.New("cannot process")),
 			},
 			args: args{
-				version:           "v1.0.0",
-				targetNamespace:   "default",
-				watchingNamespace: "",
+				version:         "v1.0.0",
+				targetNamespace: "default",
 			},
 			wantErr: true,
 		},
@@ -298,10 +260,9 @@ func Test_componentsClient_Get(t *testing.T) {
 			gs := NewWithT(t)
 
 			options := ComponentsOptions{
-				Version:           tt.args.version,
-				TargetNamespace:   tt.args.targetNamespace,
-				WatchingNamespace: tt.args.watchingNamespace,
-				SkipVariables:     tt.args.skipVariables,
+				Version:             tt.args.version,
+				TargetNamespace:     tt.args.targetNamespace,
+				SkipTemplateProcess: tt.args.skipVariables,
 			}
 			f := newComponentsClient(tt.fields.provider, tt.fields.repository, configClient)
 			if tt.fields.processor != nil {
@@ -318,7 +279,6 @@ func Test_componentsClient_Get(t *testing.T) {
 			gs.Expect(got.Type()).To(Equal(tt.want.provider.Type()))
 			gs.Expect(got.Version()).To(Equal(tt.want.version))
 			gs.Expect(got.TargetNamespace()).To(Equal(tt.want.targetNamespace))
-			gs.Expect(got.WatchingNamespace()).To(Equal(tt.want.watchingNamespace))
 			gs.Expect(got.Variables()).To(Equal(tt.want.variables))
 
 			yaml, err := got.Yaml()
@@ -331,7 +291,7 @@ func Test_componentsClient_Get(t *testing.T) {
 				gs.Expect(yaml).To(ContainSubstring(variableValue))
 			}
 
-			// Verify that when SkipVariables is set we have all the variables
+			// Verify that when SkipTemplateProcess is set we have all the variables
 			// in the template without the values processed.
 			if tt.args.skipVariables {
 				for _, v := range tt.want.variables {
@@ -339,14 +299,8 @@ func Test_componentsClient_Get(t *testing.T) {
 				}
 			}
 
-			for _, o := range got.InstanceObjs() {
+			for _, o := range got.Objs() {
 				for _, v := range []string{clusterctlv1.ClusterctlLabelName, clusterv1.ProviderLabelName} {
-					gs.Expect(o.GetLabels()).To(HaveKey(v))
-				}
-			}
-
-			for _, o := range got.SharedObjs() {
-				for _, v := range []string{clusterctlv1.ClusterctlLabelName, clusterv1.ProviderLabelName, clusterctlv1.ClusterctlResourceLifecyleLabelName} {
 					gs.Expect(o.GetLabels()).To(HaveKey(v))
 				}
 			}

@@ -18,6 +18,7 @@ package v1alpha4
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -83,20 +84,36 @@ const (
 
 	// InterruptibleLabel is the label used to mark the nodes that run on interruptible instances.
 	InterruptibleLabel = "cluster.x-k8s.io/interruptible"
+
+	// ManagedByAnnotation is an annotation that can be applied to InfraCluster resources to signify that
+	// some external system is managing the cluster infrastructure.
+	//
+	// Provider InfraCluster controllers will ignore resources with this annotation.
+	// An external controller must fulfill the contract of the InfraCluster resource.
+	// External infrastructure providers should ensure that the annotation, once set, cannot be removed.
+	ManagedByAnnotation = "cluster.x-k8s.io/managed-by"
+)
+
+var (
+	// ZeroDuration is a zero value of the metav1.Duration type.
+	ZeroDuration = metav1.Duration{}
+)
+
+const (
+	// MachineNodeNameIndex is used by the Machine Controller to index Machines by Node name, and add a watch on Nodes.
+	MachineNodeNameIndex = "status.nodeRef.name"
 )
 
 // MachineAddressType describes a valid MachineAddress type.
 type MachineAddressType string
 
+// Define the MachineAddressType constants.
 const (
 	MachineHostName    MachineAddressType = "Hostname"
 	MachineExternalIP  MachineAddressType = "ExternalIP"
 	MachineInternalIP  MachineAddressType = "InternalIP"
 	MachineExternalDNS MachineAddressType = "ExternalDNS"
 	MachineInternalDNS MachineAddressType = "InternalDNS"
-
-	// MachineNodeNameIndex is used by the Machine Controller to index Machines by Node name, and add a watch on Nodes.
-	MachineNodeNameIndex = "status.nodeRef.name"
 )
 
 // MachineAddress contains information for the node's address.

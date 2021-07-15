@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package conversion implements conversion utilities.
 package conversion
 
 import (
@@ -34,7 +35,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/util"
@@ -106,29 +109,52 @@ func MarshalData(src metav1.Object, dst metav1.Object) error {
 	if err != nil {
 		return err
 	}
-	if dst.GetAnnotations() == nil {
-		dst.SetAnnotations(map[string]string{})
+	annotations := dst.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
 	}
-	dst.GetAnnotations()[DataAnnotation] = string(data)
+	annotations[DataAnnotation] = string(data)
+	dst.SetAnnotations(annotations)
 	return nil
 }
 
 // UnmarshalData tries to retrieve the data from the annotation and unmarshals it into the object passed as input.
 func UnmarshalData(from metav1.Object, to interface{}) (bool, error) {
-	data, ok := from.GetAnnotations()[DataAnnotation]
+	annotations := from.GetAnnotations()
+	data, ok := annotations[DataAnnotation]
 	if !ok {
 		return false, nil
 	}
 	if err := json.Unmarshal([]byte(data), to); err != nil {
 		return false, err
 	}
-	delete(from.GetAnnotations(), DataAnnotation)
+	delete(annotations, DataAnnotation)
+	from.SetAnnotations(annotations)
 	return true, nil
 }
 
 // GetFuzzer returns a new fuzzer to be used for testing.
 func GetFuzzer(scheme *runtime.Scheme, funcs ...fuzzer.FuzzerFuncs) *fuzz.Fuzzer {
-	funcs = append([]fuzzer.FuzzerFuncs{metafuzzer.Funcs}, funcs...)
+	funcs = append([]fuzzer.FuzzerFuncs{
+		metafuzzer.Funcs,
+		func(_ runtimeserializer.CodecFactory) []interface{} {
+			return []interface{}{
+				// Custom fuzzer for metav1.Time pointers which weren't
+				// fuzzed and always resulted in `nil` values.
+				// This implementation is somewhat similar to the one provided
+				// in the metafuzzer.Funcs.
+				func(input *metav1.Time, c fuzz.Continue) {
+					if input != nil {
+						var sec, nsec uint32
+						c.Fuzz(&sec)
+						c.Fuzz(&nsec)
+						fuzzed := metav1.Unix(int64(sec), int64(nsec)).Rfc3339Copy()
+						input.Time = fuzzed.Time
+					}
+				},
+			}
+		},
+	}, funcs...)
 	return fuzzer.FuzzerFor(
 		fuzzer.MergeFuzzerFuncs(funcs...),
 		rand.NewSource(rand.Int63()),
@@ -152,6 +178,10 @@ type FuzzTestFuncInput struct {
 // FuzzTestFunc returns a new testing function to be used in tests to make sure conversions between
 // the Hub version of an object and an older version aren't lossy.
 func FuzzTestFunc(input FuzzTestFuncInput) func(*testing.T) {
+	if input.Scheme == nil {
+		input.Scheme = scheme.Scheme
+	}
+
 	return func(t *testing.T) {
 		t.Run("spoke-hub-spoke", func(t *testing.T) {
 			g := gomega.NewWithT(t)

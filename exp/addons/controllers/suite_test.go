@@ -17,61 +17,68 @@ limitations under the License.
 package controllers
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/cluster-api/controllers/noderefutil"
 	"sigs.k8s.io/cluster-api/controllers/remote"
-	"sigs.k8s.io/cluster-api/test/helpers"
+	"sigs.k8s.io/cluster-api/exp/addons/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/internal/envtest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	// +kubebuilder:scaffold:imports
 )
 
-// These tests use Ginkgo (BDD-style Go testing framework). Refer to
-// http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
-
 var (
-	testEnv *helpers.TestEnvironment
-	ctx     = ctrl.SetupSignalHandler()
+	env *envtest.Environment
+	ctx = ctrl.SetupSignalHandler()
 )
 
-func TestAPIs(t *testing.T) {
-	RegisterFailHandler(Fail)
+func TestMain(m *testing.M) {
+	fmt.Println("Creating new test environment")
+	env = envtest.New([]client.Object{&corev1.ConfigMap{}, &corev1.Secret{}, &v1alpha4.ClusterResourceSetBinding{}}...)
 
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"Controller Suite",
-		[]Reporter{printer.NewlineReporter{}})
-}
-
-var _ = BeforeSuite(func() {
-	By("bootstrapping test environment")
-	testEnv = helpers.NewTestEnvironment()
-	trckr, err := remote.NewClusterCacheTracker(log.NullLogger{}, testEnv.Manager)
-	Expect(err).NotTo(HaveOccurred())
-	Expect((&ClusterResourceSetReconciler{
-		Client:  testEnv,
-		Tracker: trckr,
-	}).SetupWithManager(ctx, testEnv.Manager, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
-	Expect((&ClusterResourceSetBindingReconciler{
-		Client: testEnv,
-	}).SetupWithManager(ctx, testEnv.Manager, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
-
-	By("starting the manager")
-	go func() {
-		defer GinkgoRecover()
-		Expect(testEnv.StartManager(ctx)).To(Succeed())
-	}()
-	<-testEnv.Manager.Elected()
-	testEnv.WaitForWebhooks()
-}, 60)
-
-var _ = AfterSuite(func() {
-	if testEnv != nil {
-		By("tearing down the test environment")
-		Expect(testEnv.Stop()).To(Succeed())
+	// Set up the MachineNodeIndex
+	if err := noderefutil.AddMachineNodeIndex(ctx, env.Manager); err != nil {
+		panic(fmt.Sprintf("undable to setup machine node index: %v", err))
 	}
-})
+
+	trckr, err := remote.NewClusterCacheTracker(env.Manager, remote.ClusterCacheTrackerOptions{})
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create new cluster cache tracker: %v", err))
+	}
+	reconciler := ClusterResourceSetReconciler{
+		Client:  env,
+		Tracker: trckr,
+	}
+	if err = reconciler.SetupWithManager(ctx, env.Manager, controller.Options{MaxConcurrentReconciles: 1}); err != nil {
+		panic(fmt.Sprintf("Failed to set up cluster resource set reconciler: %v", err))
+	}
+	bindingReconciler := ClusterResourceSetBindingReconciler{
+		Client: env,
+	}
+	if err = bindingReconciler.SetupWithManager(ctx, env.Manager, controller.Options{MaxConcurrentReconciles: 1}); err != nil {
+		panic(fmt.Sprintf("Failed to set up cluster resource set binding reconciler: %v", err))
+	}
+
+	go func() {
+		fmt.Println("Starting the manager")
+		if err := env.Start(ctx); err != nil {
+			panic(fmt.Sprintf("Failed to start the envtest manager: %v", err))
+		}
+	}()
+	<-env.Manager.Elected()
+	env.WaitForWebhooks()
+
+	code := m.Run()
+
+	fmt.Println("Tearing down test suite")
+	if err := env.Stop(); err != nil {
+		panic(fmt.Sprintf("Failed to stop envtest: %v", err))
+	}
+
+	os.Exit(code)
+}

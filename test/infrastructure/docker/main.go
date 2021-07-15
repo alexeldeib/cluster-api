@@ -32,11 +32,14 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/controllers/remote"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/feature"
+	infrav1old "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha3"
 	infrav1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/test/infrastructure/docker/controllers"
-	infrav1exp "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha4"
+	infraexpv1old "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha3"
+	infraexpv1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/api/v1alpha4"
 	expcontrollers "sigs.k8s.io/cluster-api/test/infrastructure/docker/exp/controllers"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -48,7 +51,7 @@ var (
 	myscheme = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 
-	//flags.
+	// flags.
 	metricsBindAddr      string
 	enableLeaderElection bool
 	syncPeriod           time.Duration
@@ -62,15 +65,17 @@ func init() {
 	klog.InitFlags(nil)
 
 	_ = scheme.AddToScheme(myscheme)
+	_ = infrav1old.AddToScheme(myscheme)
 	_ = infrav1.AddToScheme(myscheme)
-	_ = infrav1exp.AddToScheme(myscheme)
+	_ = infraexpv1old.AddToScheme(myscheme)
+	_ = infraexpv1.AddToScheme(myscheme)
 	_ = clusterv1.AddToScheme(myscheme)
 	_ = expv1.AddToScheme(myscheme)
 	// +kubebuilder:scaffold:scheme
 }
 
 func initFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", ":8080",
+	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", "localhost:8080",
 		"The address the metric endpoint binds to.")
 	fs.IntVar(&concurrency, "concurrency", 10,
 		"The number of docker machines to process simultaneously")
@@ -98,7 +103,9 @@ func main() {
 
 	ctrl.SetLogger(klogr.New())
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.UserAgent = remote.DefaultClusterAPIUserAgent("cluster-api-docker-controller-manager")
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 myscheme,
 		MetricsBindAddress:     metricsBindAddr,
 		LeaderElection:         enableLeaderElection,

@@ -107,22 +107,6 @@ It is strongly recommended that:
 * Bootstrap providers release a file called ` bootstrap-components.yaml`
 * Control plane providers release a file called `control-plane-components.yaml`
 
-#### Shared and instance components
-
-The objects contained in a component YAML file can be divided in two sets:
-
-* Instance specific objects, like the Deployment for the controller, the ServiceAccount used for running the controller
-  and the related RBAC rules.
-* The objects that are shared among all the provider instances, like e.g. CRDs, ValidatingWebhookConfiguration or the
-  Deployment implementing the web-hook servers and related Service and Certificates.
-
-As per the Cluster API contract, all the shared objects are expected to be deployed in a namespace named `capi-webhook-system`
-(if applicable).
-
-clusterctl implements a different lifecycle for shared resources e.g.
-* Ensuring that the version of the shared objects for each provider matches the latest version installed in the cluster.
-* Ensuring that deleting an instance of a provider does not destroy shared resources unless explicitly requested by the user.
-
 #### Target namespace
 
 The instance components should contain one Namespace object, which will be used as the default target namespace
@@ -150,7 +134,9 @@ Each provider is expected to deploy controllers using a Deployment.
 While defining the Deployment Spec, the container that executes the controller binary MUST be called `manager`.
 
 The manager MUST support a `--namespace` flag for specifying the namespace where the controller
-will look for objects to reconcile.
+will look for objects to reconcile; however, clusterctl will always install providers watching for all namespaces 
+(`--namespace=""`); for more details see [support for multiple instances](../../developer/architecture/controllers/support-multiple-instances.md)
+for more context.
 
 #### Variables
 
@@ -197,10 +183,12 @@ providers.
 |CAPI          | cluster.x-k8s.io/provider=cluster-api                  |
 |CABPK         | cluster.x-k8s.io/provider=bootstrap-kubeadm            |
 |CACPK         | cluster.x-k8s.io/provider=control-plane-kubeadm        |
+|CACPN         | cluster.x-k8s.io/provider=control-plane-nested        |
 |CAPA          | cluster.x-k8s.io/provider=infrastructure-aws           |
 |CAPV          | cluster.x-k8s.io/provider=infrastructure-vsphere       |
 |CAPD          | cluster.x-k8s.io/provider=infrastructure-docker        |
 |CAPM3         | cluster.x-k8s.io/provider=infrastructure-metal3        |
+|CAPN          | cluster.x-k8s.io/provider=infrastructure-nested        |
 |CAPP          | cluster.x-k8s.io/provider=infrastructure-packet        |
 |CAPZ          | cluster.x-k8s.io/provider=infrastructure-azure         |
 |CAPO          | cluster.x-k8s.io/provider=infrastructure-openstack     |
@@ -208,7 +196,7 @@ providers.
 
 ### Workload cluster templates
 
-An infrastructure provider could publish a **cluster templates** file to be used by `clusterctl config cluster`.
+An infrastructure provider could publish a **cluster templates** file to be used by `clusterctl generate cluster`.
 This is single YAML with _all_ the objects required to create a new workload cluster.
 
 The following rules apply:
@@ -219,7 +207,7 @@ Cluster templates MUST be stored in the same folder as the component YAML and fo
 1. The default cluster template should be named `cluster-template.yaml`.
 2. Additional cluster template should be named `cluster-template-{flavor}.yaml`. e.g `cluster-template-prod.yaml`
 
-`{flavor}` is the name the user can pass to the `clusterctl config cluster --flavor` flag to identify the specific template to use.
+`{flavor}` is the name the user can pass to the `clusterctl generate cluster --flavor` flag to identify the specific template to use.
 
 Each provider SHOULD create user facing documentation with the list of available cluster templates.
 
@@ -238,7 +226,7 @@ notes that are required to assist the user in defining the value for each variab
 
 ##### Common variables
 
-The `clusterctl config cluster` command allows user to set a small set of common variables via CLI flags or command arguments.
+The `clusterctl generate cluster` command allows user to set a small set of common variables via CLI flags or command arguments.
 
 Templates writers should use the common variables to ensure consistency across providers and a simpler user experience
 (if compared to the usage of OS environment variables or the `clusterctl` config file).
@@ -250,7 +238,7 @@ Templates writers should use the common variables to ensure consistency across p
 |`--controlplane-machine-count`| `${CONTROL_PLANE_MACHINE_COUNT}` | The number of control plane machines to be added to the workload cluster |
 |`--worker-machine-count`| `${WORKER_MACHINE_COUNT}` | The number of worker machines to be added to the workload cluster |
 
-Additionally, the value of the command argument to `clusterctl config cluster <cluster-name>` (`<cluster-name>` in this case), will
+Additionally, the value of the command argument to `clusterctl generate cluster <cluster-name>` (`<cluster-name>` in this case), will
 be applied to every occurrence of the `${ CLUSTER_NAME }` variable.
 
 ## OwnerReferences chain
@@ -282,7 +270,6 @@ Provider authors should be aware of the following transformations that `clusterc
 * Enforcement of target namespace:
   * The name of the namespace object is set;
   * The namespace field of all the objects is set (with exception of cluster wide objects like e.g. ClusterRoles);
-* Enforcement of watching namespace;
 * All components are labeled;
 
 ### Cluster template transformations
@@ -310,10 +297,35 @@ functioning of `clusterctl` when using non-compliant component YAML or cluster t
 
 Provider authors should be aware that `clusterctl move` command implements a discovery mechanism that considers:
 
-* All the objects of Kind defined in one of the CRDs installed by clusterctl using `clusterctl init`.
-* `Secret` and `ConfigMap` objects.
-* The `OwnerReference` chain of the above objects.
-* Any object of Kind in which its CRD has the "move" label (`clusterctl.cluster.x-k8s.io/move`) attached to it.
+* All the Kind defined in one of the CRDs installed by clusterctl using `clusterctl init` (identified via the `clusterctl.cluster.x-k8s.io label`); 
+  For each CRD, discovery collects:
+  * All the objects from the namespace being moved only if the CRD scope is `Namespaced`.
+  * All the objects if the CRD scope is `Cluster`.
+* All the `ConfigMap` objects from the namespace being moved.
+* All the `Secret` objects from the namespace being moved and from the namespaces where infrastructure providers are installed.
+
+After completing discovery, `clusterctl move` moves to the target cluster only the objects discovered in the previous phase
+that are compliant with one of the following rules:
+  * The object is directly or indirectly linked to a `Cluster` object (linked through the `OwnerReference` chain).
+  * The object is a secret containing a user provided certificate (linked to a `Cluster` object via a naming convention).
+  * The object is directly or indirectly linked to a `ClusterResourceSet` object (through the `OwnerReference` chain).
+  * The object is directly or indirectly linked to another object with the `clusterctl.cluster.x-k8s.io/move-hierarchy` 
+    label, e.g. the infrastructure Provider ClusterIdentity objects (linked through the `OwnerReference` chain).
+  * The object hase the `clusterctl.cluster.x-k8s.io/move` label or the `clusterctl.cluster.x-k8s.io/move-hierarchy` label,
+    e.g. the CPI config secret. 
+    
+Note. `clusterctl.cluster.x-k8s.io/move` and `clusterctl.cluster.x-k8s.io/move-hierarchy` labels could be applied 
+to single objects or at the CRD level (the label applies to all the objects).
+    
+Please note that during move:
+  * Namespaced objects, if not existing in the target cluster, are created.
+  * Namespaced objects, if already existing in the target cluster, are updated.  
+  * Namespaced objects are removed from the source cluster.
+  * Global objects, if not existing in the target cluster, are created.
+  * Global objects, if already existing in the target cluster, are not updated.
+  * Global objects are not removed from the source cluster.
+  * Namespaced objects which are part of an owner chain that starts with a global object (e.g. a secret containing 
+    credentials for an infrastructure Provider ClusterIdentity) are treated as Global objects.
 
 <aside class="note warning">
 
@@ -323,15 +335,8 @@ When using the "move" label, if the CRD is a global resource, the object is copi
 
 </aside>
 
-`clusterctl move` does NOT consider any objects:
-
-* Not included in the set of objects defined above.
-* Included in the set of objects defined above, but not:
-  * Directly or indirectly linked to a `Cluster` object through the `OwnerReference` chain.
-  * Directly or indirectly linked to a `ClusterResourceSet` object through the `OwnerReference` chain.
-
 If moving some of excluded object is required, the provider authors should create documentation describing the
-the exact move sequence to be executed by the user.
+exact move sequence to be executed by the user.
 
 Additionally, provider authors should be aware that `clusterctl move` assumes all the provider's Controllers respect the
 `Cluster.Spec.Paused` field introduced in the v1alpha3 Cluster API specification.

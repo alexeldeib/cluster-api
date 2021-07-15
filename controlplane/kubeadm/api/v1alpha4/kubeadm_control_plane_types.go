@@ -25,15 +25,18 @@ import (
 	"sigs.k8s.io/cluster-api/errors"
 )
 
+// RolloutStrategyType defines the rollout strategies for a KubeadmControlPlane.
 type RolloutStrategyType string
 
 const (
-	// Replace the old control planes by new one using rolling update
+	// RollingUpdateStrategyType replaces the old control planes by new one using rolling update
 	// i.e. gradually scale up or down the old control planes and scale up or down the new one.
 	RollingUpdateStrategyType RolloutStrategyType = "RollingUpdate"
 )
 
 const (
+	// KubeadmControlPlaneFinalizer is the finalizer applied to KubeadmControlPlane resources
+	// by its managing controller.
 	KubeadmControlPlaneFinalizer = "kubeadm.controlplane.cluster.x-k8s.io"
 
 	// SkipCoreDNSAnnotation annotation explicitly skips reconciling CoreDNS if set.
@@ -58,30 +61,44 @@ type KubeadmControlPlaneSpec struct {
 	// Version defines the desired Kubernetes version.
 	Version string `json:"version"`
 
-	// InfrastructureTemplate is a required reference to a custom resource
-	// offered by an infrastructure provider.
-	InfrastructureTemplate corev1.ObjectReference `json:"infrastructureTemplate"`
+	// MachineTemplate contains information about how machines
+	// should be shaped when creating or updating a control plane.
+	MachineTemplate KubeadmControlPlaneMachineTemplate `json:"machineTemplate"`
 
 	// KubeadmConfigSpec is a KubeadmConfigSpec
 	// to use for initializing and joining machines to the control plane.
 	KubeadmConfigSpec cabpkv1.KubeadmConfigSpec `json:"kubeadmConfigSpec"`
 
-	// UpgradeAfter is a field to indicate an upgrade should be performed
+	// RolloutAfter is a field to indicate a rollout should be performed
 	// after the specified time even if no changes have been made to the
-	// KubeadmControlPlane
+	// KubeadmControlPlane.
+	//
 	// +optional
-	UpgradeAfter *metav1.Time `json:"upgradeAfter,omitempty"`
+	RolloutAfter *metav1.Time `json:"rolloutAfter,omitempty"`
+
+	// The RolloutStrategy to use to replace control plane machines with
+	// new ones.
+	// +optional
+	RolloutStrategy *RolloutStrategy `json:"rolloutStrategy,omitempty"`
+}
+
+// KubeadmControlPlaneMachineTemplate defines the template for Machines
+// in a KubeadmControlPlane object.
+type KubeadmControlPlaneMachineTemplate struct {
+	// Standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
+	// +optional
+	ObjectMeta clusterv1.ObjectMeta `json:"metadata,omitempty"`
+
+	// InfrastructureRef is a required reference to a custom resource
+	// offered by an infrastructure provider.
+	InfrastructureRef corev1.ObjectReference `json:"infrastructureRef"`
 
 	// NodeDrainTimeout is the total amount of time that the controller will spend on draining a controlplane node
 	// The default value is 0, meaning that the node can be drained without any time limitations.
 	// NOTE: NodeDrainTimeout is different from `kubectl drain --timeout`
 	// +optional
 	NodeDrainTimeout *metav1.Duration `json:"nodeDrainTimeout,omitempty"`
-
-	// The RolloutStrategy to use to replace control plane machines with
-	// new ones.
-	// +optional
-	RolloutStrategy *RolloutStrategy `json:"rolloutStrategy,omitempty"`
 }
 
 // RolloutStrategy describes how to replace existing machines
@@ -195,10 +212,12 @@ type KubeadmControlPlane struct {
 	Status KubeadmControlPlaneStatus `json:"status,omitempty"`
 }
 
+// GetConditions returns the set of conditions for this object.
 func (in *KubeadmControlPlane) GetConditions() clusterv1.Conditions {
 	return in.Status.Conditions
 }
 
+// SetConditions sets the conditions on this object.
 func (in *KubeadmControlPlane) SetConditions(conditions clusterv1.Conditions) {
 	in.Status.Conditions = conditions
 }

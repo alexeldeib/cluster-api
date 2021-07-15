@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
@@ -46,26 +47,56 @@ const (
 	healthCheckPollInterval       = 10 * time.Second
 	healthCheckRequestTimeout     = 5 * time.Second
 	healthCheckUnhealthyThreshold = 10
-	ClusterCacheControllerName    = "cluster-cache-tracker"
+	clusterCacheControllerName    = "cluster-cache-tracker"
 )
 
 // ClusterCacheTracker manages client caches for workload clusters.
 type ClusterCacheTracker struct {
-	log    logr.Logger
-	client client.Client
-	scheme *runtime.Scheme
+	log                   logr.Logger
+	clientUncachedObjects []client.Object
+	client                client.Client
+	scheme                *runtime.Scheme
 
 	lock             sync.RWMutex
 	clusterAccessors map[client.ObjectKey]*clusterAccessor
 }
 
+// ClusterCacheTrackerOptions defines options to configure
+// a ClusterCacheTracker.
+type ClusterCacheTrackerOptions struct {
+	// Log is the logger used throughout the lifecycle of caches.
+	// Defaults to a no-op logger if it's not set.
+	Log logr.Logger
+
+	// ClientUncachedObjects instructs the Client to never cache the following objects,
+	// it'll instead query the API server directly.
+	// Defaults to never caching ConfigMap and Secret if not set.
+	ClientUncachedObjects []client.Object
+}
+
+func setDefaultOptions(opts *ClusterCacheTrackerOptions) {
+	if opts.Log == nil {
+		opts.Log = log.NullLogger{}
+	}
+
+	if len(opts.ClientUncachedObjects) == 0 {
+		opts.ClientUncachedObjects = []client.Object{
+			&corev1.ConfigMap{},
+			&corev1.Secret{},
+		}
+	}
+}
+
 // NewClusterCacheTracker creates a new ClusterCacheTracker.
-func NewClusterCacheTracker(log logr.Logger, manager ctrl.Manager) (*ClusterCacheTracker, error) {
+func NewClusterCacheTracker(manager ctrl.Manager, options ClusterCacheTrackerOptions) (*ClusterCacheTracker, error) {
+	setDefaultOptions(&options)
+
 	return &ClusterCacheTracker{
-		log:              log,
-		client:           manager.GetClient(),
-		scheme:           manager.GetScheme(),
-		clusterAccessors: make(map[client.ObjectKey]*clusterAccessor),
+		log:                   options.Log,
+		clientUncachedObjects: options.ClientUncachedObjects,
+		client:                manager.GetClient(),
+		scheme:                manager.GetScheme(),
+		clusterAccessors:      make(map[client.ObjectKey]*clusterAccessor),
 	}, nil
 }
 
@@ -119,7 +150,7 @@ func (t *ClusterCacheTracker) getClusterAccessorLH(ctx context.Context, cluster 
 // newClusterAccessor creates a new clusterAccessor.
 func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster client.ObjectKey) (*clusterAccessor, error) {
 	// Get a rest config for the remote cluster
-	config, err := RESTConfig(ctx, ClusterCacheControllerName, t.client, cluster)
+	config, err := RESTConfig(ctx, clusterCacheControllerName, t.client, cluster)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error fetching REST client config for remote cluster %q", cluster.String())
 	}
@@ -155,7 +186,7 @@ func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster cl
 	}
 
 	// Start the cache!!!
-	go cache.Start(cacheCtx)
+	go cache.Start(cacheCtx) //nolint:errcheck
 
 	// Start cluster healthcheck!!!
 	go t.healthCheckCluster(cacheCtx, &healthCheckInput{
@@ -164,12 +195,9 @@ func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster cl
 	})
 
 	delegatingClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		CacheReader: cache,
-		Client:      c,
-		UncachedObjects: []client.Object{
-			&corev1.ConfigMap{},
-			&corev1.Secret{},
-		},
+		CacheReader:     cache,
+		Client:          c,
+		UncachedObjects: t.clientUncachedObjects,
 	})
 	if err != nil {
 		return nil, err

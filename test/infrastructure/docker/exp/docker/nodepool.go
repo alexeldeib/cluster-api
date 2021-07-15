@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package docker implements docker functionality.
 package docker
 
 import (
@@ -52,9 +53,9 @@ type NodePool struct {
 }
 
 // NewNodePool creates a new node pool instances.
-func NewNodePool(kClient client.Client, cluster *clusterv1.Cluster, mp *clusterv1exp.MachinePool, dmp *infrav1exp.DockerMachinePool) (*NodePool, error) {
+func NewNodePool(c client.Client, cluster *clusterv1.Cluster, mp *clusterv1exp.MachinePool, dmp *infrav1exp.DockerMachinePool) (*NodePool, error) {
 	np := &NodePool{
-		client:            kClient,
+		client:            c,
 		cluster:           cluster,
 		machinePool:       mp,
 		dockerMachinePool: dmp,
@@ -83,7 +84,7 @@ func (np *NodePool) ReconcileMachines(ctx context.Context) (ctrl.Result, error) 
 	for _, machine := range np.machines {
 		totalNumberOfMachines++
 		if totalNumberOfMachines > desiredReplicas || !np.isMachineMatchingInfrastructureSpec(machine) {
-			externalMachine, err := docker.NewMachine(np.cluster.Name, machine.Name(), np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
+			externalMachine, err := docker.NewMachine(np.cluster, machine.Name(), np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
 			if err != nil {
 				return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine named %s", machine.Name())
 			}
@@ -148,7 +149,7 @@ func (np *NodePool) ReconcileMachines(ctx context.Context) (ctrl.Result, error) 
 // Delete will delete all of the machines in the node pool.
 func (np *NodePool) Delete(ctx context.Context) error {
 	for _, machine := range np.machines {
-		externalMachine, err := docker.NewMachine(np.cluster.Name, machine.Name(), np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
+		externalMachine, err := docker.NewMachine(np.cluster, machine.Name(), np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create helper for managing the externalMachine named %s", machine.Name())
 		}
@@ -180,7 +181,7 @@ func (np *NodePool) machinesMatchingInfrastructureSpec() []*docker.Machine {
 // addMachine will add a new machine to the node pool and update the docker machine pool status.
 func (np *NodePool) addMachine(ctx context.Context) error {
 	instanceName := fmt.Sprintf("worker-%s", util.RandomString(6))
-	externalMachine, err := docker.NewMachine(np.cluster.Name, instanceName, np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
+	externalMachine, err := docker.NewMachine(np.cluster, instanceName, np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create helper for managing the externalMachine named %s", instanceName)
 	}
@@ -194,7 +195,7 @@ func (np *NodePool) addMachine(ctx context.Context) error {
 // refresh asks docker to list all the machines matching the node pool label and updates the cached list of node pool
 // machines.
 func (np *NodePool) refresh() error {
-	machines, err := docker.ListMachinesByCluster(np.cluster.Name, np.labelFilters)
+	machines, err := docker.ListMachinesByCluster(np.cluster, np.labelFilters)
 	if err != nil {
 		return errors.Wrapf(err, "failed to list all machines in the cluster")
 	}
@@ -241,7 +242,7 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 		}
 	}()
 
-	externalMachine, err := docker.NewMachine(np.cluster.Name, machine.Name(), np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
+	externalMachine, err := docker.NewMachine(np.cluster, machine.Name(), np.dockerMachinePool.Spec.Template.CustomImage, np.labelFilters)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine named %s", machine.Name())
 	}
@@ -281,7 +282,7 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 		if err != nil {
 			// Requeue if there is an error, as this is likely momentary load balancer
 			// state changes during control plane provisioning.
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true}, nil // nolint:nilerr
 		}
 
 		machineStatus.Addresses = []clusterv1.MachineAddress{
@@ -307,7 +308,7 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 		// state changes during control plane provisioning.
 		if err := externalMachine.SetNodeProviderID(ctx); err != nil {
 			log.V(4).Info("transient error setting the provider id")
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{Requeue: true}, nil // nolint:nilerr
 		}
 		// Set ProviderID so the Cluster API Machine Controller can pull it
 		providerID := externalMachine.ProviderID()
@@ -319,14 +320,14 @@ func (np *NodePool) reconcileMachine(ctx context.Context, machine *docker.Machin
 }
 
 // getBootstrapData fetches the bootstrap data for the machine pool.
-func getBootstrapData(ctx context.Context, kClient client.Client, machinePool *clusterv1exp.MachinePool) (string, error) {
+func getBootstrapData(ctx context.Context, c client.Client, machinePool *clusterv1exp.MachinePool) (string, error) {
 	if machinePool.Spec.Template.Spec.Bootstrap.DataSecretName == nil {
 		return "", errors.New("error retrieving bootstrap data: linked MachinePool's bootstrap.dataSecretName is nil")
 	}
 
 	s := &corev1.Secret{}
 	key := client.ObjectKey{Namespace: machinePool.GetNamespace(), Name: *machinePool.Spec.Template.Spec.Bootstrap.DataSecretName}
-	if err := kClient.Get(ctx, key, s); err != nil {
+	if err := c.Get(ctx, key, s); err != nil {
 		return "", errors.Wrapf(err, "failed to retrieve bootstrap data secret for DockerMachinePool instance %s/%s", machinePool.GetNamespace(), machinePool.GetName())
 	}
 

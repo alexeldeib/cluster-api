@@ -351,7 +351,7 @@ func TestToUnstructured(t *testing.T) {
 		{
 			name: "empty object are dropped",
 			args: args{
-				rawyaml: []byte("---\n" + //empty objects before
+				rawyaml: []byte("---\n" + // empty objects before
 					"---\n" +
 					"---\n" +
 					"apiVersion: v1\n" +
@@ -361,7 +361,7 @@ func TestToUnstructured(t *testing.T) {
 					"---\n" +
 					"apiVersion: v1\n" +
 					"kind: Secret\n" +
-					"---\n" + //empty objects after
+					"---\n" + // empty objects after
 					"---\n" +
 					"---\n"),
 			},
@@ -465,4 +465,18 @@ func TestFromUnstructured(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(string(rawyaml)).To(Equal(string(convertedyaml)))
+}
+
+func TestRaw(t *testing.T) {
+	g := NewWithT(t)
+
+	input := `
+		apiVersion:v1
+		kind:newKind
+		spec:
+			param: abc
+	`
+	output := "apiVersion:v1\nkind:newKind\nspec:\n\tparam: abc\n"
+	result := Raw(input)
+	g.Expect(result).To(Equal(output))
 }

@@ -13,9 +13,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
+// Package config implements clusterctl config functionality.
 package config
 
 import _ "embed"
 
+// ClusterctlAPIManifest contains the clustectl manifests in raw bytes format.
+//
 //go:embed manifest/clusterctl-api.yaml
 var ClusterctlAPIManifest []byte

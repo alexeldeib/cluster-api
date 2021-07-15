@@ -120,10 +120,10 @@ func WatchDeploymentLogs(ctx context.Context, input WatchDeploymentLogsInput) {
 			go func(pod corev1.Pod, container corev1.Container) {
 				defer GinkgoRecover()
 
-				logFile := path.Join(input.LogPath, input.Deployment.Name, pod.Name, container.Name+".log")
-				Expect(os.MkdirAll(filepath.Dir(logFile), 0755)).To(Succeed())
+				logFile := filepath.Clean(path.Join(input.LogPath, input.Deployment.Name, pod.Name, container.Name+".log"))
+				Expect(os.MkdirAll(filepath.Dir(logFile), 0750)).To(Succeed())
 
-				f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 				Expect(err).NotTo(HaveOccurred())
 				defer f.Close()
 
@@ -160,9 +160,6 @@ type WatchPodMetricsInput struct {
 }
 
 // WatchPodMetrics captures metrics from all pods every 5s. It expects to find port 8080 open on the controller.
-// Use replacements in an e2econfig to enable metrics scraping without kube-rbac-proxy, e.g:
-//     - new: --metrics-bind-addr=:8080
-//       old: --metrics-addr=127.0.0.1:8080
 func WatchPodMetrics(ctx context.Context, input WatchPodMetricsInput) {
 	// Dump machine metrics every 5 seconds
 	ticker := time.NewTicker(time.Second * 5)
@@ -194,9 +191,6 @@ func WatchPodMetrics(ctx context.Context, input WatchPodMetricsInput) {
 }
 
 // dumpPodMetrics captures metrics from all pods. It expects to find port 8080 open on the controller.
-// Use replacements in an e2econfig to enable metrics scraping without kube-rbac-proxy, e.g:
-//     - new: --metrics-addr=:8080
-//       old: --metrics-addr=127.0.0.1:8080
 func dumpPodMetrics(ctx context.Context, client *kubernetes.Clientset, metricsPath string, deploymentName string, pods *corev1.PodList) {
 	for _, pod := range pods.Items {
 		metricsDir := path.Join(metricsPath, deploymentName, pod.Name)

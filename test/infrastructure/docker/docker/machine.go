@@ -26,27 +26,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	"sigs.k8s.io/kind/pkg/cluster/constants"
-	"sigs.k8s.io/kind/pkg/exec"
 
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/test/infrastructure/container"
 	infrav1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/test/infrastructure/docker/cloudinit"
 	"sigs.k8s.io/cluster-api/test/infrastructure/docker/docker/types"
-	"sigs.k8s.io/cluster-api/util/container"
+	clusterapicontainer "sigs.k8s.io/cluster-api/util/container"
 )
 
 const (
 	defaultImageName = "kindest/node"
-	defaultImageTag  = "v1.19.1"
+	defaultImageTag  = "v1.21.2"
 )
 
 type nodeCreator interface {
-	CreateControlPlaneNode(name, image, clusterLabel, listenAddress string, port int32, mounts []v1alpha4.Mount, portMappings []v1alpha4.PortMapping, labels map[string]string) (node *types.Node, err error)
-	CreateWorkerNode(name, image, clusterLabel string, mounts []v1alpha4.Mount, portMappings []v1alpha4.PortMapping, labels map[string]string) (node *types.Node, err error)
+	CreateControlPlaneNode(ctx context.Context, name, image, clusterName, listenAddress string, port int32, mounts []v1alpha4.Mount, portMappings []v1alpha4.PortMapping, labels map[string]string, ipFamily clusterv1.ClusterIPFamily) (node *types.Node, err error)
+	CreateWorkerNode(ctx context.Context, name, image, clusterName string, mounts []v1alpha4.Mount, portMappings []v1alpha4.PortMapping, labels map[string]string, ipFamily clusterv1.ClusterIPFamily) (node *types.Node, err error)
 }
 
 // Machine implement a service for managing the docker containers hosting a kubernetes nodes.
@@ -54,6 +56,7 @@ type Machine struct {
 	cluster   string
 	machine   string
 	image     string
+	ipFamily  clusterv1.ClusterIPFamily
 	labels    map[string]string
 	container *types.Node
 
@@ -61,62 +64,78 @@ type Machine struct {
 }
 
 // NewMachine returns a new Machine service for the given Cluster/DockerCluster pair.
-func NewMachine(cluster, machine, image string, labels map[string]string) (*Machine, error) {
-	if cluster == "" {
+func NewMachine(cluster *clusterv1.Cluster, machine, image string, labels map[string]string) (*Machine, error) {
+	if cluster == nil {
 		return nil, errors.New("cluster is required when creating a docker.Machine")
+	}
+	if cluster.Name == "" {
+		return nil, errors.New("cluster name is required when creating a docker.Machine")
 	}
 	if machine == "" {
 		return nil, errors.New("machine is required when creating a docker.Machine")
 	}
 
-	filters := []string{
-		withLabel(clusterLabel(cluster)),
-		withName(machineContainerName(cluster, machine)),
-	}
+	filters := container.FilterBuilder{}
+	filters.AddKeyNameValue(filterLabel, clusterLabelKey, cluster.Name)
+	filters.AddKeyValue(filterName, fmt.Sprintf("^%s$", machineContainerName(cluster.Name, machine)))
 	for key, val := range labels {
-		filters = append(filters, withLabel(toLabel(key, val)))
+		filters.AddKeyNameValue(filterLabel, key, val)
 	}
 
-	container, err := getContainer(filters...)
+	newContainer, err := getContainer(filters)
 	if err != nil {
 		return nil, err
 	}
 
+	ipFamily, err := cluster.GetIPFamily()
+	if err != nil {
+		return nil, fmt.Errorf("create docker machine: %s", err)
+	}
+
 	return &Machine{
-		cluster:     cluster,
+		cluster:     cluster.Name,
 		machine:     machine,
 		image:       image,
-		container:   container,
+		ipFamily:    ipFamily,
+		container:   newContainer,
 		labels:      labels,
 		nodeCreator: &Manager{},
 	}, nil
 }
 
-func ListMachinesByCluster(cluster string, labels map[string]string) ([]*Machine, error) {
-	if cluster == "" {
+func ListMachinesByCluster(cluster *clusterv1.Cluster, labels map[string]string) ([]*Machine, error) {
+	if cluster == nil {
 		return nil, errors.New("cluster is required when listing machines in the cluster")
 	}
-
-	filters := []string{
-		withLabel(clusterLabel(cluster)),
+	if cluster.Name == "" {
+		return nil, errors.New("cluster name is required when listing machines in the cluster")
 	}
+
+	filters := container.FilterBuilder{}
+	filters.AddKeyNameValue(filterLabel, clusterLabelKey, cluster.Name)
 	for key, val := range labels {
-		filters = append(filters, withLabel(toLabel(key, val)))
+		filters.AddKeyNameValue(filterLabel, key, val)
 	}
 
-	containers, err := listContainers(filters...)
+	containers, err := listContainers(filters)
 	if err != nil {
 		return nil, err
 	}
 
+	ipFamily, err := cluster.GetIPFamily()
+	if err != nil {
+		return nil, fmt.Errorf("list docker machines by cluster: %s", err)
+	}
+
 	machines := make([]*Machine, len(containers))
-	for i, container := range containers {
+	for i, containerNode := range containers {
 		machines[i] = &Machine{
-			cluster:     cluster,
-			machine:     machineFromContainerName(cluster, container.Name),
-			image:       container.Image,
+			cluster:     cluster.Name,
+			machine:     machineFromContainerName(cluster.Name, containerNode.Name),
+			image:       containerNode.Image,
+			ipFamily:    ipFamily,
 			labels:      labels,
-			container:   container,
+			container:   containerNode,
 			nodeCreator: &Manager{},
 		}
 	}
@@ -164,11 +183,14 @@ func (m *Machine) ProviderID() string {
 }
 
 func (m *Machine) Address(ctx context.Context) (string, error) {
-	ipv4, _, err := m.container.IP(ctx)
+	ipv4, ipv6, err := m.container.IP(ctx)
 	if err != nil {
 		return "", err
 	}
 
+	if m.ipFamily == clusterv1.IPv6IPFamily {
+		return ipv6, nil
+	}
 	return ipv4, nil
 }
 
@@ -189,14 +211,16 @@ func (m *Machine) Create(ctx context.Context, role string, version *string, moun
 		case constants.ControlPlaneNodeRoleValue:
 			log.Info("Creating control plane machine container")
 			m.container, err = m.nodeCreator.CreateControlPlaneNode(
+				ctx,
 				m.ContainerName(),
 				machineImage,
-				clusterLabel(m.cluster),
+				m.cluster,
 				"127.0.0.1",
 				0,
 				kindMounts(mounts),
 				nil,
 				m.labels,
+				m.ipFamily,
 			)
 			if err != nil {
 				return errors.WithStack(err)
@@ -204,12 +228,14 @@ func (m *Machine) Create(ctx context.Context, role string, version *string, moun
 		case constants.WorkerNodeRoleValue:
 			log.Info("Creating worker machine container")
 			m.container, err = m.nodeCreator.CreateWorkerNode(
+				ctx,
 				m.ContainerName(),
 				machineImage,
-				clusterLabel(m.cluster),
+				m.cluster,
 				kindMounts(mounts),
 				nil,
 				m.labels,
+				m.ipFamily,
 			)
 			if err != nil {
 				return errors.WithStack(err)
@@ -225,7 +251,7 @@ func (m *Machine) Create(ctx context.Context, role string, version *string, moun
 		})
 		if err != nil {
 			log.Info("Failed running command", "command", "crictl ps")
-			logContainerDebugInfo(ctx, m.ContainerName())
+			logContainerDebugInfo(log, m.ContainerName())
 			return errors.Wrap(errors.WithStack(err), "failed to run crictl ps")
 		}
 		return nil
@@ -258,12 +284,17 @@ func (m *Machine) PreloadLoadImages(ctx context.Context, images []string) error 
 	}
 	defer os.RemoveAll(dir)
 
-	for i, image := range images {
-		imageTarPath := filepath.Join(dir, fmt.Sprintf("image-%d.tar", i))
+	containerRuntime, err := container.NewDockerClient()
+	if err != nil {
+		return errors.Wrap(err, "failed to connect to container runtime")
+	}
 
-		err = exec.Command("docker", "save", "-o", imageTarPath, image).Run()
+	for i, image := range images {
+		imageTarPath := filepath.Clean(filepath.Join(dir, fmt.Sprintf("image-%d.tar", i)))
+
+		err = containerRuntime.SaveContainerImage(ctx, image, imageTarPath)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to save image")
 		}
 
 		f, err := os.Open(imageTarPath)
@@ -312,7 +343,7 @@ func (m *Machine) ExecBootstrap(ctx context.Context, data string) error {
 		err := cmd.Run(ctx)
 		if err != nil {
 			log.Info("Failed running command", "command", command, "stdout", outStd.String(), "stderr", outErr.String(), "bootstrap data", data)
-			logContainerDebugInfo(ctx, m.ContainerName())
+			logContainerDebugInfo(log, m.ContainerName())
 			return errors.Wrap(errors.WithStack(err), "failed to run cloud config")
 		}
 	}
@@ -333,12 +364,10 @@ func (m *Machine) CheckForBootstrapSuccess(ctx context.Context) error {
 	cmd := m.container.Commander.Command("test", "-f", "/run/cluster-api/bootstrap-success.complete")
 	cmd.SetStderr(&outErr)
 	cmd.SetStdout(&outStd)
-	err := cmd.Run(ctx)
-	if err != nil {
+	if err := cmd.Run(ctx); err != nil {
 		log.Info("Failed running command", "command", "test -f /run/cluster-api/bootstrap-success.complete", "stdout", outStd.String(), "stderr", outErr.String())
 		return errors.Wrap(errors.WithStack(err), "failed to run bootstrap check")
 	}
-
 	return nil
 }
 
@@ -379,10 +408,11 @@ func (m *Machine) SetNodeProviderID(ctx context.Context) error {
 
 func (m *Machine) getKubectlNode() (*types.Node, error) {
 	// collect info about the existing controlplane nodes
-	kubectlNodes, err := listContainers(
-		withLabel(clusterLabel(m.cluster)),
-		withLabel(roleLabel(constants.ControlPlaneNodeRoleValue)),
-	)
+	filters := container.FilterBuilder{}
+	filters.AddKeyNameValue(filterLabel, clusterLabelKey, m.cluster)
+	filters.AddKeyNameValue(filterLabel, nodeRoleLabelKey, constants.ControlPlaneNodeRoleValue)
+
+	kubectlNodes, err := listContainers(filters)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -422,7 +452,7 @@ func (m *Machine) machineImage(version *string) string {
 		return defaultImage
 	}
 
-	//TODO(fp) make this smarter
+	// TODO(fp) make this smarter
 	// - allows usage of custom docker repository & image names
 	// - add v only for semantic versions
 	versionString := *version
@@ -430,25 +460,28 @@ func (m *Machine) machineImage(version *string) string {
 		versionString = fmt.Sprintf("v%s", versionString)
 	}
 
-	versionString = container.SemverToOCIImageTag(versionString)
+	versionString = clusterapicontainer.SemverToOCIImageTag(versionString)
 
 	return fmt.Sprintf("%s:%s", defaultImageName, versionString)
 }
 
-func logContainerDebugInfo(ctx context.Context, name string) {
-	log := ctrl.LoggerFrom(ctx)
+func logContainerDebugInfo(log logr.Logger, name string) {
+	// let's use our own context, so we are able to get debug information even
+	// when the context used in the layers above is already timed out
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "inspect", name)
-	output, err := exec.CombinedOutputLines(cmd)
+	containerRuntime, err := container.NewDockerClient()
 	if err != nil {
-		log.Error(err, "Failed inspecting the machine container", "output", output)
+		log.Error(err, "failed to connect to container runtime")
+		return
 	}
-	log.Info("Inspected the machine container", "output", output)
 
-	cmd = exec.CommandContext(ctx, "docker", "logs", name)
-	output, err = exec.CombinedOutputLines(cmd)
+	var buffer bytes.Buffer
+	err = containerRuntime.ContainerDebugInfo(ctx, name, &buffer)
 	if err != nil {
-		log.Error(err, "Failed to get logs from the machine container", "output", output)
+		log.Error(err, "failed to get logs from the machine container")
+		return
 	}
-	log.Info("Got logs from the machine container", "output", output)
+	log.Info("Got logs from the machine container", "output", strings.ReplaceAll(buffer.String(), "\\n", "\n"))
 }

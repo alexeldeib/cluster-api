@@ -21,6 +21,7 @@ rules:
 - apiGroups:
   - addons.cluster.x-k8s.io
   resources:
+  - clusterresourcesets/finalizers
   - clusterresourcesets/status
   verbs:
   - get
@@ -50,20 +51,6 @@ rules:
   - watch
 - apiGroups:
   - bootstrap.cluster.x-k8s.io
-  - exp.infrastructure.cluster.x-k8s.io
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - '*'
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - bootstrap.cluster.x-k8s.io
   - infrastructure.cluster.x-k8s.io
   resources:
   - '*'
@@ -79,6 +66,7 @@ rules:
   - cluster.x-k8s.io
   resources:
   - clusters
+  - clusters/finalizers
   - clusters/status
   verbs:
   - create
@@ -92,6 +80,7 @@ rules:
   - cluster.x-k8s.io
   resources:
   - machinedeployments
+  - machinedeployments/finalizers
   - machinedeployments/status
   verbs:
   - create
@@ -105,6 +94,7 @@ rules:
   - cluster.x-k8s.io
   resources:
   - machinehealthchecks
+  - machinehealthchecks/finalizers
   - machinehealthchecks/status
   verbs:
   - get
@@ -115,7 +105,22 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
+  - machinepools
+  - machinepools/finalizers
+  - machinepools/status
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
   - machines
+  - machines/finalizers
   - machines/status
   verbs:
   - create
@@ -128,7 +133,18 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
+  - machines
+  - machines/status
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
   - machinesets
+  - machinesets/finalizers
   - machinesets/status
   verbs:
   - create
@@ -178,29 +194,4 @@ rules:
   - get
   - list
   - patch
-  - watch
-- apiGroups:
-  - exp.cluster.x-k8s.io
-  resources:
-  - '*'
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - exp.cluster.x-k8s.io
-  resources:
-  - machinepools
-  - machinepools/status
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
   - watch

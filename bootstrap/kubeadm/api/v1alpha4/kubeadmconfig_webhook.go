@@ -20,18 +20,17 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	runtime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
 
 var (
-	ConflictingFileSourceMsg = "only one of content of contentFrom may be specified for a single file"
-	MissingFileSourceMsg     = "source for file content must be specified if contenFrom is non-nil"
-	MissingSecretNameMsg     = "secret file source must specify non-empty secret name"
-	MissingSecretKeyMsg      = "secret file source must specify non-empty secret key"
-	PathConflictMsg          = "path property must be unique among all files"
+	conflictingFileSourceMsg = "only one of content or contentFrom may be specified for a single file"
+	missingSecretNameMsg     = "secret file source must specify non-empty secret name"
+	missingSecretKeyMsg      = "secret file source must specify non-empty secret key"
+	pathConflictMsg          = "path property must be unique among all files"
 )
 
 func (c *KubeadmConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -40,7 +39,7 @@ func (c *KubeadmConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:verbs=create;update,path=/validate-bootstrap-cluster-x-k8s-io-v1alpha4-kubeadmconfig,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigs,versions=v1alpha4,name=validation.kubeadmconfig.bootstrap.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1beta1
+// +kubebuilder:webhook:verbs=create;update,path=/validate-bootstrap-cluster-x-k8s-io-v1alpha4-kubeadmconfig,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=bootstrap.cluster.x-k8s.io,resources=kubeadmconfigs,versions=v1alpha4,name=validation.kubeadmconfig.bootstrap.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 var _ webhook.Validator = &KubeadmConfig{}
 
@@ -72,7 +71,7 @@ func (c *KubeadmConfigSpec) validate(name string) error {
 				field.Invalid(
 					field.NewPath("spec", "files", fmt.Sprintf("%d", i)),
 					file,
-					ConflictingFileSourceMsg,
+					conflictingFileSourceMsg,
 				),
 			)
 		}
@@ -86,7 +85,7 @@ func (c *KubeadmConfigSpec) validate(name string) error {
 					field.Invalid(
 						field.NewPath("spec", "files", fmt.Sprintf("%d", i), "contentFrom", "secret", "name"),
 						file,
-						MissingSecretNameMsg,
+						missingSecretNameMsg,
 					),
 				)
 			}
@@ -96,7 +95,7 @@ func (c *KubeadmConfigSpec) validate(name string) error {
 					field.Invalid(
 						field.NewPath("spec", "files", fmt.Sprintf("%d", i), "contentFrom", "secret", "key"),
 						file,
-						MissingSecretKeyMsg,
+						missingSecretKeyMsg,
 					),
 				)
 			}
@@ -108,7 +107,7 @@ func (c *KubeadmConfigSpec) validate(name string) error {
 				field.Invalid(
 					field.NewPath("spec", "files", fmt.Sprintf("%d", i), "path"),
 					file,
-					PathConflictMsg,
+					pathConflictMsg,
 				),
 			)
 		}

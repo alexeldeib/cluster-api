@@ -49,6 +49,7 @@ func Get(ctx context.Context, c client.Client, ref *corev1.ObjectReference, name
 	return obj, nil
 }
 
+// CloneTemplateInput is the input to CloneTemplate.
 type CloneTemplateInput struct {
 	// Client is the controller runtime client.
 	// +required
@@ -73,6 +74,10 @@ type CloneTemplateInput struct {
 	// Labels is an optional map of labels to be added to the object.
 	// +optional
 	Labels map[string]string
+
+	// Annotations is an optional map of annotations to be added to the object.
+	// +optional
+	Annotations map[string]string
 }
 
 // CloneTemplate uses the client and the reference to create a new object from the template.
@@ -88,6 +93,7 @@ func CloneTemplate(ctx context.Context, in *CloneTemplateInput) (*corev1.ObjectR
 		ClusterName: in.ClusterName,
 		OwnerRef:    in.OwnerRef,
 		Labels:      in.Labels,
+		Annotations: in.Annotations,
 	}
 	to, err := GenerateTemplate(generateTemplateInput)
 	if err != nil {
@@ -102,7 +108,7 @@ func CloneTemplate(ctx context.Context, in *CloneTemplateInput) (*corev1.ObjectR
 	return GetObjectReference(to), nil
 }
 
-// GenerateTemplate input is everything needed to generate a new template.
+// GenerateTemplateInput is the input needed to generate a new template.
 type GenerateTemplateInput struct {
 	// Template is the TemplateRef turned into an unstructured.
 	// +required
@@ -127,8 +133,13 @@ type GenerateTemplateInput struct {
 	// Labels is an optional map of labels to be added to the object.
 	// +optional
 	Labels map[string]string
+
+	// Annotations is an optional map of annotations to be added to the object.
+	// +optional
+	Annotations map[string]string
 }
 
+// GenerateTemplate generates an object with the given template input.
 func GenerateTemplate(in *GenerateTemplateInput) (*unstructured.Unstructured, error) {
 	template, found, err := unstructured.NestedMap(in.Template.Object, "spec", "template")
 	if !found {
@@ -146,10 +157,14 @@ func GenerateTemplate(in *GenerateTemplateInput) (*unstructured.Unstructured, er
 	to.SetName(names.SimpleNameGenerator.GenerateName(in.Template.GetName() + "-"))
 	to.SetNamespace(in.Namespace)
 
-	if to.GetAnnotations() == nil {
-		to.SetAnnotations(map[string]string{})
-	}
+	// Set annotations.
 	annotations := to.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	for key, value := range in.Annotations {
+		annotations[key] = value
+	}
 	annotations[clusterv1.TemplateClonedFromNameAnnotation] = in.TemplateRef.Name
 	annotations[clusterv1.TemplateClonedFromGroupKindAnnotation] = in.TemplateRef.GroupVersionKind().GroupKind().String()
 	to.SetAnnotations(annotations)

@@ -20,6 +20,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -164,7 +165,6 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 			args: args{
 				options: ApplyUpgradeOptions{
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					ManagementGroup:         "cluster-api-system/cluster-api",
 					Contract:                test.CurrentCAPIContract,
 					CoreProvider:            "",
 					BootstrapProviders:      nil,
@@ -193,7 +193,6 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 			args: args{
 				options: ApplyUpgradeOptions{
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					ManagementGroup:         "cluster-api-system/cluster-api",
 					Contract:                "",
 					CoreProvider:            "cluster-api-system/cluster-api:v1.0.1",
 					BootstrapProviders:      nil,
@@ -222,7 +221,6 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 			args: args{
 				options: ApplyUpgradeOptions{
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					ManagementGroup:         "cluster-api-system/cluster-api",
 					Contract:                "",
 					CoreProvider:            "",
 					BootstrapProviders:      nil,
@@ -251,7 +249,6 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 			args: args{
 				options: ApplyUpgradeOptions{
 					Kubeconfig:              Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"},
-					ManagementGroup:         "cluster-api-system/cluster-api",
 					Contract:                "",
 					CoreProvider:            "cluster-api-system/cluster-api:v1.0.1",
 					BootstrapProviders:      nil,
@@ -303,7 +300,7 @@ func Test_clusterctlClient_ApplyUpgrade(t *testing.T) {
 			for i := range gotProviders.Items {
 				tt.wantProviders.Items[i].ResourceVersion = gotProviders.Items[i].ResourceVersion
 			}
-			g.Expect(gotProviders).To(Equal(tt.wantProviders))
+			g.Expect(gotProviders).To(Equal(tt.wantProviders), cmp.Diff(gotProviders, tt.wantProviders))
 		})
 	}
 }
@@ -340,8 +337,8 @@ func fakeClientForUpgrade() *fakeClient {
 	cluster1 := newFakeCluster(cluster.Kubeconfig{Path: "kubeconfig", Context: "mgmt-context"}, config1).
 		WithRepository(repository1).
 		WithRepository(repository2).
-		WithProviderInventory(core.Name(), core.Type(), "v1.0.0", "cluster-api-system", "watchingNS").
-		WithProviderInventory(infra.Name(), infra.Type(), "v2.0.0", "infra-system", "watchingNS").
+		WithProviderInventory(core.Name(), core.Type(), "v1.0.0", "cluster-api-system").
+		WithProviderInventory(infra.Name(), infra.Type(), "v2.0.0", "infra-system").
 		WithObjs(test.FakeCAPISetupObjects()...)
 
 	client := newFakeClient(config1).
@@ -364,13 +361,13 @@ func fakeProvider(name string, providerType clusterctlv1.ProviderType, version, 
 			Labels: map[string]string{
 				clusterctlv1.ClusterctlLabelName:     "",
 				clusterv1.ProviderLabelName:          clusterctlv1.ManifestLabel(name, providerType),
-				clusterctlv1.ClusterctlCoreLabelName: "inventory",
+				clusterctlv1.ClusterctlCoreLabelName: clusterctlv1.ClusterctlCoreLabelInventoryValue,
 			},
 		},
 		ProviderName:     name,
 		Type:             string(providerType),
 		Version:          version,
-		WatchedNamespace: "watchingNS",
+		WatchedNamespace: "",
 	}
 }
 

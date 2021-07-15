@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package locking implements locking functionality.
 package locking
 
 import (
@@ -23,7 +24,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
-	apicorev1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
@@ -132,11 +133,11 @@ type information struct {
 }
 
 type semaphore struct {
-	*apicorev1.ConfigMap
+	*corev1.ConfigMap
 }
 
 func newSemaphore() *semaphore {
-	return &semaphore{&apicorev1.ConfigMap{}}
+	return &semaphore{&corev1.ConfigMap{}}
 }
 
 func configMapName(clusterName string) string {

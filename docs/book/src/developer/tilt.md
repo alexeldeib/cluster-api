@@ -17,7 +17,7 @@ workflow that offers easy deployments and rapid iterative builds.
 1. [envsubst](https://github.com/drone/envsubst) or similar to handle
    clusterctl var replacement. Note: drone/envsubst releases v1.0.2 and
    earlier do not have the binary packaged under cmd/envsubst. It is
-   available in Go psuedo-version `v1.0.3-0.20200709231038-aa43e1c1a629`
+   available in Go pseudo-version `v1.0.3-0.20200709231038-aa43e1c1a629`
 1. Clone the [Cluster
    API](https://github.com/kubernetes-sigs/cluster-api) repository
    locally
@@ -40,6 +40,7 @@ First, make sure you have a kind cluster and that your `KUBECONFIG` is set up co
 ``` bash
 kind create cluster
 ```
+IMPORTANT, if you are planning to use the CAPD provider, check that you created the required mounts for allowing the provider to access the Docker socket on the host; see [quick start](https://cluster-api.sigs.k8s.io/user/quick-start.html#usage) for instructions.
 
 ### Create a tilt-settings.json file
 
@@ -239,7 +240,7 @@ for the provider and performs a live update of the running container.
 docker build. e.g.
 
 ``` Dockerfile
-RUN wget -qO- https://dl.k8s.io/v1.19.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
+RUN wget -qO- https://dl.k8s.io/v1.21.2/kubernetes-client-linux-amd64.tar.gz | tar xvz
 RUN wget -qO- https://get.docker.com | sh
 ```
 
